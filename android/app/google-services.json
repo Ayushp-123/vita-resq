@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "944959872518",
+    "project_id": "vita-resq",
+    "storage_bucket": "vita-resq.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:944959872518:android:aaf77bfe9f0461a8902d87",
+        "android_client_info": {
+          "package_name": "com.example.jan_sarthi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDiweI69vDWX036yJxGOr7qQfhaQ9VzsHY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

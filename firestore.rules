@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // USERS COLLECTION
+    // =========================================================================
+    // Profiles can be read by authenticated users (volunteers & victims).
+    // Profiles can ONLY be created or updated by the authenticated owner.
+    // Deletions are forbidden.
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // EMERGENCIES COLLECTION
+    // =========================================================================
+    // Emergencies can be read by all authenticated users (radar discovery & tracking).
+    // Creation is strictly restricted to the authenticated victim for themselves.
+    // Updates are permitted for victims (status/location) and responders (claims).
+    // Deletions are forbidden to preserve life-safety audit logs.
+    match /emergencies/{emergencyId} {
+      allow read: if request.auth != null;
+
+      // 1. SOS Dispatch / Emergency Creation:
+      // - Must be authenticated
+      // - victimId MUST match authenticated caller UID (no impersonation)
+      // - Emergency ID must match document path
+      // - Initial status must be 'SEARCHING'
+      // - Initial radius must be within safety bounds (<= 5000m)
+      allow create: if request.auth != null
+        && request.resource.data.victimId == request.auth.uid
+        && request.resource.data.id == emergencyId
+        && request.resource.data.status == 'SEARCHING'
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number
+        && request.resource.data.currentRadiusMeters <= 5000.0;
+
+      // 2. Emergency State Updates:
+      // - Victim can update location, cancel emergency, or update radius
+      // - Responders can claim emergency (add themselves to responders map)
+      // - Responders can update their own location and responder status
+      // - Responders can update status (ARRIVED, COMPLETED)
+      // - Background expanding radius / notified users updates
+      allow update: if request.auth != null && (
+        // Caller is the victim
+        request.auth.uid == resource.data.victimId ||
+        // Caller is an existing responder
+        request.auth.uid in resource.data.responders.keys() ||
+        // Caller is claiming / joining the emergency responders map
+        request.resource.data.responders.keys().hasAny([request.auth.uid]) ||
+        // User adding their own UID to notifiedUserIds
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifiedUserIds'])
+          && request.resource.data.notifiedUserIds.hasAll(resource.data.notifiedUserIds)) ||
+        // Radius expansion timer updates
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentRadiusMeters', 'updatedAt'])
+      );
+
+      allow delete: if false;
+
+      // Responders subcollection (if used)
+      match /responders/{responderId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == responderId;
+      }
+    }
+
+    // Default deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
