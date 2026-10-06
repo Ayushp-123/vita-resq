@@ -3,10 +3,146 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/emergency_model.dart';
 import '../models/communication_mode.dart';
-import '../core/theme/app_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_shapes.dart';
+import '../core/theme/app_typography.dart';
 import '../services/notification_service.dart';
 
+/// Centralized Dialog & Bottom Sheet Service for Vita ResQ (Phase 8 Redesign).
+///
+/// Follows strict feedback principles:
+/// - Warm white surfaces (`AppColors.surfacePureWhite`)
+/// - Rounded corners (`AppShapes.dialog`, 20dp+)
+/// - Clear title, concise human explanation
+/// - Safe action visually favored over destructive actions
+/// - All touch targets >= 48dp
+/// - Responsive across 360x640 and 390x844 without overflows
 class AppDialogs {
+  /// Standardized Destructive Action Confirmation Dialog.
+  ///
+  /// Places the SAFE action as the prominent primary button (blue/filled)
+  /// and the DESTRUCTIVE action as the secondary outline button.
+  static Future<bool?> showDestructiveConfirmDialog({
+    required BuildContext context,
+    required String title,
+    required String message,
+    required String confirmLabel,
+    String cancelLabel = 'Cancel',
+    VoidCallback? onConfirm,
+    bool isDangerous = true,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfacePureWhite,
+        shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: (isDangerous ? AppColors.emergencyRed : AppColors.brandBlue)
+                    .withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isDangerous ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
+                color: isDangerous ? AppColors.emergencyRed : AppColors.brandBlue,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.deepNavy,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: AppTypography.bodySecondary.copyWith(
+            fontSize: 13.5,
+            height: 1.4,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.brandBlue,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 48),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(
+                    cancelLabel,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: isDangerous ? AppColors.emergencyRed : AppColors.deepNavy,
+                    side: BorderSide(
+                      color: isDangerous ? AppColors.emergencyRed : AppColors.borderMedium,
+                      width: 1.2,
+                    ),
+                    minimumSize: const Size(0, 48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
+                    Navigator.of(ctx).pop(true);
+                    if (onConfirm != null) onConfirm();
+                  },
+                  child: Text(
+                    confirmLabel,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show Intentional Confirmation Dialog for Cancelling Emergency
+  static Future<bool?> showCancelEmergencyDialog({
+    required BuildContext context,
+    required VoidCallback onConfirmCancel,
+  }) {
+    return showDestructiveConfirmDialog(
+      context: context,
+      title: 'Cancel emergency?',
+      message: 'Are you sure you no longer need help? Responders will be notified.',
+      cancelLabel: 'Keep Emergency Active',
+      confirmLabel: 'Cancel Emergency',
+      isDangerous: true,
+      onConfirm: onConfirmCancel,
+    );
+  }
+
   /// Show 5-Second SOS Countdown Bottom Sheet with Audio Alert & Cancel Option
   static Future<bool?> showSOSConfirmationBottomSheet({
     required BuildContext context,
@@ -30,7 +166,7 @@ class AppDialogs {
     );
   }
 
-  /// Show Incoming Nearby Emergency Alert Modal (Matching emergency_alert HTML design)
+  /// Show Incoming Nearby Emergency Alert Modal (Standardized Phase 8 Presentation)
   static void showNearbyEmergencyDialog({
     required BuildContext context,
     required EmergencyModel emergency,
@@ -43,38 +179,38 @@ class AppDialogs {
     // Play role-specific siren and alert tone immediately with deduplication
     EmergencySoundService.playEmergencyAlert(userRole: userRole, emergencyId: emergency.id);
 
-    bool isAmbulance = userRole == 'AMBULANCE_DRIVER';
-    bool isPolice = userRole == 'POLICE_PCR';
+    final bool isAmbulance = userRole == 'AMBULANCE_DRIVER';
+    final bool isPolice = userRole == 'POLICE_PCR';
 
-    Color headerColor = isAmbulance
-        ? AppTheme.primaryRed
+    final Color headerColor = isAmbulance
+        ? AppColors.emergencyRed
         : isPolice
-            ? AppTheme.secondaryBlue
-            : AppTheme.primaryRed;
+            ? AppColors.brandBlue
+            : AppColors.emergencyRed;
 
-    String titleText = isAmbulance
-        ? '🚨 URGENT DISPATCH: MEDICAL SOS'
+    final String titleText = isAmbulance
+        ? 'URGENT DISPATCH: MEDICAL SOS'
         : isPolice
-            ? '🚨 URGENT DISPATCH: POLICE ALERT'
-            : '🚨 NEARBY EMERGENCY';
+            ? 'URGENT DISPATCH: POLICE ALERT'
+            : 'NEARBY EMERGENCY ALERT';
 
-    String subtitleText = isAmbulance
-        ? 'Priority alert dispatched to Ambulance #${vehicleNumber ?? '108'}'
+    final String subtitleText = isAmbulance
+        ? 'Priority dispatch to Ambulance #${vehicleNumber ?? '108'}'
         : isPolice
-            ? 'Priority alert dispatched to Patrol Unit #${vehicleNumber ?? 'PCR-12'}'
-            : 'Someone nearby needs emergency assistance.';
+            ? 'Priority dispatch to Patrol Unit #${vehicleNumber ?? 'PCR-12'}'
+            : 'Someone nearby needs urgent assistance.';
 
-    String actionLabel = isAmbulance
-        ? 'ACCEPT & START SIREN ROUTING'
+    final String actionLabel = isAmbulance
+        ? 'ACCEPT & START ROUTING'
         : isPolice
-            ? 'ACCEPT & START POLICE ROUTING'
+            ? 'ACCEPT & START PATROL ROUTING'
             : 'VIEW EMERGENCY';
 
-    IconData actionIcon = isAmbulance
-        ? Icons.local_hospital
+    final IconData actionIcon = isAmbulance
+        ? Icons.local_hospital_rounded
         : isPolice
-            ? Icons.local_police
-            : Icons.directions_run;
+            ? Icons.local_police_rounded
+            : Icons.directions_run_rounded;
 
     showModalBottomSheet(
       context: context,
@@ -83,144 +219,185 @@ class AppDialogs {
       builder: (context) {
         return Container(
           decoration: const BoxDecoration(
-            color: AppTheme.surfaceLowest,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Top Accent Line
-              Container(
-                height: 8,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: headerColor,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                ),
+            color: AppColors.surfacePureWhite,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 24,
+                offset: Offset(0, -6),
               ),
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            ],
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Top Accent Line
+                  Container(
+                    height: 6,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: headerColor,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 20, 22, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: headerColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            isAmbulance
-                                ? Icons.emergency
-                                : isPolice
-                                    ? Icons.local_police
-                                    : Icons.warning_amber_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                titleText,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: headerColor,
-                                ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: headerColor.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                subtitleText,
-                                style: const TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant),
+                              child: Icon(
+                                isAmbulance
+                                    ? Icons.emergency_rounded
+                                    : isPolice
+                                        ? Icons.local_police_rounded
+                                        : Icons.warning_amber_rounded,
+                                color: headerColor,
+                                size: 26,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    titleText,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: headerColor,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    subtitleText,
+                                    style: AppTypography.bodySecondary.copyWith(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        // Details Card
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppColors.subtleBlueGray,
+                            borderRadius: AppShapes.medium,
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.location_on_rounded, color: AppColors.brandBlue, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Incident Radius: ${(emergency.currentRadiusMeters / 1000).toStringAsFixed(1)} km',
+                                    style: AppTypography.bodyMedium.copyWith(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.deepNavy,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isAmbulance || isPolice
+                                          ? AppColors.emergencyLightRed
+                                          : AppColors.emeraldLight,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      isAmbulance
+                                          ? 'AMBULANCE PRIORITY'
+                                          : isPolice
+                                              ? 'POLICE PATROL'
+                                              : 'CITIZEN VOLUNTEER',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: isAmbulance || isPolice
+                                            ? AppColors.emergencyRed
+                                            : AppColors.emeraldGreen,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Action Buttons (Both >= 48dp touch targets)
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: headerColor,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 50),
+                            elevation: 0,
+                            shape: const RoundedRectangleBorder(borderRadius: AppShapes.medium),
+                          ),
+                          icon: Icon(actionIcon, size: 20),
+                          label: Text(
+                            actionLabel,
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                          ),
+                          onPressed: () {
+                            EmergencySoundService.stopSound();
+                            Navigator.of(context).pop();
+                            onViewEmergency();
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textSecondary,
+                            side: const BorderSide(color: AppColors.borderMedium),
+                            minimumSize: const Size(double.infinity, 48),
+                            shape: const RoundedRectangleBorder(borderRadius: AppShapes.medium),
+                          ),
+                          onPressed: () {
+                            EmergencySoundService.stopSound();
+                            Navigator.of(context).pop();
+                            if (onDecline != null) onDecline();
+                          },
+                          child: const Text(
+                            'DECLINE / DISMISS',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                    // Details Card
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceLow,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.surfaceHighest),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_outlined, color: AppTheme.secondaryBlue, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Search Radius Stage: ${(emergency.currentRadiusMeters / 1000).toStringAsFixed(1)} km',
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: isAmbulance || isPolice ? Colors.red.shade50 : Colors.green.shade100,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  isAmbulance
-                                      ? '🚑 AMBULANCE EMERGENCY DISPATCH'
-                                      : isPolice
-                                          ? '🚓 POLICE PATROL DISPATCH'
-                                          : 'Searching for a helper',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: isAmbulance || isPolice ? AppTheme.primaryRed : Colors.green.shade900,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // Action Buttons
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: headerColor,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      icon: Icon(actionIcon, size: 20),
-                      label: Text(actionLabel),
-                      onPressed: () {
-                        EmergencySoundService.stopSound();
-                        Navigator.of(context).pop();
-                        onViewEmergency();
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: () {
-                        EmergencySoundService.stopSound();
-                        Navigator.of(context).pop();
-                        if (onDecline != null) onDecline();
-                      },
-                      child: const Text('DECLINE / DISMISS'),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
@@ -238,32 +415,55 @@ class AppDialogs {
       context: context,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          backgroundColor: AppColors.surfacePureWhite,
+          shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
           title: const Row(
             children: [
-              Icon(Icons.volunteer_activism, color: AppTheme.primaryRed),
+              Icon(Icons.volunteer_activism_rounded, color: AppColors.emergencyRed),
               SizedBox(width: 10),
-              Text('Confirm Response'),
+              Text(
+                'Confirm Response',
+                style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+              ),
             ],
           ),
-          content: const Text(
+          content: Text(
             'Are you sure you can help? Accepting will stream your live location to the victim and dispatch network.',
+            style: AppTypography.bodySecondary.copyWith(color: AppColors.textPrimary, height: 1.4),
           ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('CANCEL'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.secondaryBlue,
-                minimumSize: const Size(120, 48),
-              ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                onConfirm();
-              },
-              child: const Text('CONFIRM'),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                      side: const BorderSide(color: AppColors.borderSubtle),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('CANCEL', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.brandBlue,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      minimumSize: const Size(0, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onConfirm();
+                    },
+                    child: const Text('CONFIRM', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
             ),
           ],
         );
@@ -285,12 +485,16 @@ class AppDialogs {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              backgroundColor: AppColors.surfacePureWhite,
+              shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
               title: const Row(
                 children: [
-                  Icon(Icons.report_problem, color: AppTheme.tertiaryAmber),
+                  Icon(Icons.report_problem_rounded, color: AppColors.warningAmber),
                   SizedBox(width: 10),
-                  Text('Report a Problem'),
+                  Text(
+                    'Report a Problem',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                  ),
                 ],
               ),
               content: Column(
@@ -298,7 +502,23 @@ class AppDialogs {
                 children: [
                   DropdownButtonFormField<String>(
                     initialValue: selectedReason,
-                    decoration: const InputDecoration(labelText: 'Problem Reason'),
+                    decoration: InputDecoration(
+                      labelText: 'Problem Reason',
+                      labelStyle: const TextStyle(color: AppColors.textSecondary),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.borderSubtle),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.borderSubtle),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.brandBlue, width: 2),
+                      ),
+                    ),
                     items: const [
                       DropdownMenuItem(value: 'Traffic Delay', child: Text('Traffic Delay')),
                       DropdownMenuItem(value: 'Vehicle Problem', child: Text('Vehicle Breakdown')),
@@ -311,7 +531,12 @@ class AppDialogs {
                   ),
                   const SizedBox(height: 12),
                   CheckboxListTile(
-                    title: const Text('Cannot continue (Trigger handover to Standby pool)'),
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: AppColors.warningAmber,
+                    title: const Text(
+                      'Cannot continue (Hand over to Standby pool)',
+                      style: TextStyle(fontSize: 13, color: AppColors.deepNavy, fontWeight: FontWeight.w600),
+                    ),
                     value: isFatal,
                     onChanged: (val) {
                       setState(() => isFatal = val ?? false);
@@ -319,21 +544,39 @@ class AppDialogs {
                   ),
                 ],
               ),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('CANCEL'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.tertiaryAmber,
-                    minimumSize: const Size(120, 48),
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    onReport(selectedReason, isFatal);
-                  },
-                  child: const Text('SUBMIT'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 48),
+                          side: const BorderSide(color: AppColors.borderSubtle),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('CANCEL', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.warningAmber,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onReport(selectedReason, isFatal);
+                        },
+                        child: const Text('SUBMIT', style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             );
@@ -426,158 +669,163 @@ class _SOSCountdownSheetState extends State<_SOSCountdownSheet> with SingleTicke
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: AppTheme.surfaceLowest,
+        color: AppColors.surfacePureWhite,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: Color(0x33000000),
             blurRadius: 24,
             offset: Offset(0, -6),
           ),
         ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 26.0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle
-          Container(
-            width: 48,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppTheme.surfaceHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-          const SizedBox(height: 18),
-
-          // Pulsing Warning Icon
-          ScaleTransition(
-            scale: _pulseAnimation,
-            child: Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryRed.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.35), width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryRed.withValues(alpha: 0.3),
-                    blurRadius: 20,
-                    spreadRadius: 4,
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.emergency_rounded,
-                size: 44,
-                color: AppTheme.primaryRed,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          const Text(
-            'DISPATCHING EMERGENCY SOS',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.primaryRed,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-
-          const Text(
-            'Alerting 108 Ambulances, Police PCR & Community Volunteers in...',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant, height: 1.3),
-          ),
-          const SizedBox(height: 20),
-
-          // Circular 5-Second Countdown Indicator
-          Stack(
-            alignment: Alignment.center,
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 90,
-                height: 90,
-                child: CircularProgressIndicator(
-                  value: _secondsRemaining / 5.0,
-                  strokeWidth: 7,
-                  backgroundColor: AppTheme.surfaceHighest,
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryRed),
+              // Drag handle
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderMedium,
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '$_secondsRemaining',
-                    style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.primaryRed,
-                      height: 1.0,
+              const SizedBox(height: 18),
+
+              // Pulsing Warning Icon
+              ScaleTransition(
+                scale: _pulseAnimation,
+                child: Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: AppColors.emergencyLightRed,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.emergencyRed.withValues(alpha: 0.35),
+                      width: 2,
                     ),
                   ),
-                  const Text(
-                    'SEC',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.onSurfaceVariant,
-                      letterSpacing: 1.0,
+                  child: const Icon(
+                    Icons.emergency_rounded,
+                    size: 42,
+                    color: AppColors.emergencyRed,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'DISPATCHING EMERGENCY SOS',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.emergencyRed,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+
+              Text(
+                'Alerting nearby responders and emergency services in...',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySecondary.copyWith(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Circular 5-Second Countdown Indicator
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 90,
+                    height: 90,
+                    child: CircularProgressIndicator(
+                      value: _secondsRemaining / 5.0,
+                      strokeWidth: 7,
+                      backgroundColor: AppColors.subtleBlueGray,
+                      valueColor: const AlwaysStoppedAnimation<Color>(AppColors.emergencyRed),
                     ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$_secondsRemaining',
+                        style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.emergencyRed,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'SEC',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
+              ),
+              const SizedBox(height: 24),
+
+              // Large Cancel Button (False Alarm Guard) >= 54dp
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.emeraldGreen,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 54),
+                  elevation: 0,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: AppShapes.medium,
+                  ),
+                ),
+                icon: const Icon(Icons.cancel_outlined, size: 22),
+                label: const Text(
+                  'CANCEL SOS (FALSE ALARM)',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: 0.3),
+                ),
+                onPressed: _cancelSOS,
+              ),
+              const SizedBox(height: 10),
+
+              // Instant Send Bypass Button >= 48dp
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.emergencyRed,
+                  minimumSize: const Size(double.infinity, 48),
+                  side: const BorderSide(color: AppColors.emergencyRed, width: 1.5),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: AppShapes.medium,
+                  ),
+                ),
+                icon: const Icon(Icons.send_rounded, size: 18),
+                label: const Text(
+                  'SEND IMMEDIATELY',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+                onPressed: _dispatchSOS,
               ),
             ],
           ),
-          const SizedBox(height: 24),
-
-          // Large Cancel Button (False Alarm Guard)
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 54),
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            icon: const Icon(Icons.cancel_outlined, size: 24),
-            label: const Text(
-              'CANCEL SOS (FALSE ALARM)',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-            ),
-            onPressed: _cancelSOS,
-          ),
-          const SizedBox(height: 10),
-
-          // Instant Send Bypass Button
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.primaryRed,
-              minimumSize: const Size(double.infinity, 48),
-              side: const BorderSide(color: AppTheme.primaryRed, width: 1.5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            icon: const Icon(Icons.send_rounded, size: 18),
-            label: const Text(
-              'SEND IMMEDIATELY',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            onPressed: _dispatchSOS,
-          ),
-        ],
+        ),
       ),
     );
   }
 }
-

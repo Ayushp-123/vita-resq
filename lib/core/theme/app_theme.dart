@@ -1,72 +1,96 @@
 import 'package:flutter/material.dart';
+import 'app_colors.dart';
+import 'app_shapes.dart';
+import 'app_typography.dart';
+import 'app_spacing.dart';
 
+export 'app_colors.dart';
+export 'app_shapes.dart';
+export 'app_typography.dart';
+export 'app_spacing.dart';
+export 'app_motion.dart';
+export 'app_status.dart';
+
+/// Centralized Material 3 Theme Configuration for Vita ResQ.
+///
+/// Embodies the HUMAN + PROFESSIONAL design direction:
+/// - Warm off-white primary canvas
+/// - Very subtle blue-gray secondary surface
+/// - Deep navy structure and readable typography
+/// - Emergency red strictly guarded for SOS and danger states
+/// - Soft blue for location, routing, and primary navigation
+/// - Emerald green for safety and verification
+/// - Amber for caution and warnings
 class AppTheme {
-  // -------------------------------------------------------------
-  // BRAND IDENTITY: VITA RESQ DEEP NAVY & SLATE
-  // -------------------------------------------------------------
-  static const Color primaryNavy = Color(0xFF0F172A); // Deep Slate Navy (Brand Identity)
-  static const Color secondaryNavy = Color(0xFF1E293B); // Slate 800
-  static const Color tertiaryNavy = Color(0xFF334155); // Slate 700
+  AppTheme._();
 
-  static const Color brandBlue = Color(0xFF2563EB); // Dynamic Action Blue
-  static const Color brandDarkBlue = Color(0xFF1D4ED8);
-  static const Color brandLightBlue = Color(0xFFEFF6FF);
+  // -------------------------------------------------------------
+  // BRAND IDENTITY & CORE TOKENS (BACKWARD-COMPATIBLE ALIASES)
+  // -------------------------------------------------------------
+  static const Color primaryNavy = AppColors.deepNavy; // 0xFF0F172A
+  static const Color secondaryNavy = AppColors.navy800; // 0xFF1E293B
+  static const Color tertiaryNavy = AppColors.navy700; // 0xFF334155
 
-  // Backward-compatible aliases
+  static const Color brandBlue = AppColors.softBlue; // 0xFF2563EB
+  static const Color brandDarkBlue = AppColors.softBlueDark;
+  static const Color brandLightBlue = AppColors.softBlueLight;
+
   static const Color secondaryBlue = brandBlue;
   static const Color secondaryDarkBlue = brandDarkBlue;
   static const Color secondaryContainerBlue = brandLightBlue;
-  static const Color onSecondary = Color(0xFFFFFFFF);
-  static const Color onSecondaryContainer = Color(0xFF1E40AF);
+  static const Color onSecondary = AppColors.onSoftBlue;
+  static const Color onSecondaryContainer = AppColors.onSoftBlueContainer;
 
   // -------------------------------------------------------------
-  // EMERGENCY RED (Reserved strictly for SOS & Critical Danger)
+  // EMERGENCY RED (RESERVED STRICTLY FOR SOS & DANGER)
   // -------------------------------------------------------------
-  static const Color emergencyRed = Color(0xFFDC2626); // High-Vis Red 600
-  static const Color emergencyDarkRed = Color(0xFFB91C1C); // Deep Red 700
-  static const Color emergencyLightRed = Color(0xFFFEF2F2); // Red 50
+  static const Color emergencyRed = AppColors.emergencyRed; // 0xFFDC2626
+  static const Color emergencyDarkRed = AppColors.emergencyDarkRed;
+  static const Color emergencyLightRed = AppColors.emergencyLightRed;
   static const Color primaryRed = emergencyRed;
   static const Color primaryDarkRed = emergencyDarkRed;
   static const Color primaryContainerRed = emergencyLightRed;
-  static const Color onPrimary = Color(0xFFFFFFFF);
-  static const Color onPrimaryContainer = Color(0xFF991B1B);
+  static const Color onPrimary = AppColors.onEmergency;
+  static const Color onPrimaryContainer = AppColors.onEmergencyContainer;
 
   static const Color errorRed = Color(0xFFEF4444);
-  static const Color errorContainer = Color(0xFFFEE2E2);
+  static const Color errorContainer = AppColors.emergencyContainer;
 
   // -------------------------------------------------------------
-  // ACTIVE HELP & CONFIRMED SAFETY (Emerald Green)
+  // ACTIVE HELP & CONFIRMED SAFETY (EMERALD GREEN)
   // -------------------------------------------------------------
-  static const Color emeraldGreen = Color(0xFF10B981); // Emerald 500
-  static const Color emeraldDark = Color(0xFF059669); // Emerald 600
-  static const Color emeraldContainer = Color(0xFFECFDF5); // Emerald 50
-  static const Color onEmerald = Color(0xFFFFFFFF);
+  static const Color emeraldGreen = AppColors.emeraldGreen; // 0xFF10B981
+  static const Color emeraldDark = AppColors.emeraldDark;
+  static const Color emeraldContainer = AppColors.emeraldLight;
+  static const Color onEmerald = AppColors.onEmerald;
 
   // -------------------------------------------------------------
-  // CAUTION & STANDBY (High-Vis Amber)
+  // CAUTION & STANDBY (HIGH-VIS AMBER)
   // -------------------------------------------------------------
-  static const Color tertiaryAmber = Color(0xFFF59E0B);
-  static const Color tertiaryDarkAmber = Color(0xFFD97706);
-  static const Color tertiaryContainerAmber = Color(0xFFFFFBEB);
-  static const Color onTertiary = Color(0xFFFFFFFF);
-  static const Color onTertiaryContainer = Color(0xFF92400E);
+  static const Color tertiaryAmber = AppColors.warningAmber; // 0xFFF59E0B
+  static const Color tertiaryDarkAmber = AppColors.amberDark;
+  static const Color tertiaryContainerAmber = AppColors.amberLight;
+  static const Color onTertiary = AppColors.onAmber;
+  static const Color onTertiaryContainer = AppColors.onAmberContainer;
 
   // -------------------------------------------------------------
   // MODERN NEUTRAL SURFACES & ACCESSIBLE TYPOGRAPHY
   // -------------------------------------------------------------
-  static const Color surfaceLight = Color(0xFFF8FAFC); // Clean neutral background (Slate 50)
-  static const Color surfaceLow = Color(0xFFF1F5F9); // Slate 100
-  static const Color surfaceContainer = Color(0xFFE2E8F0); // Slate 200
-  static const Color surfaceHighest = Color(0xFFCBD5E1); // Slate 300
-  static const Color surfaceLowest = Color(0xFFFFFFFF); // Pure white card surface
-  static const Color surfaceDim = Color(0xFF94A3B8); // Slate 400
+  static const Color surfaceLight = Color(0xFFF8FAFC); // Slate 50 (test baseline preserved)
+  static const Color surfaceLow = AppColors.subtleBlueGray; // 0xFFF1F5F9
+  static const Color surfaceContainer = AppColors.borderSubtle; // 0xFFE2E8F0
+  static const Color surfaceHighest = AppColors.borderMedium; // 0xFFCBD5E1
+  static const Color surfaceLowest = AppColors.surfacePureWhite; // 0xFFFFFFFF
+  static const Color surfaceDim = AppColors.textMuted; // 0xFF94A3B8
 
-  static const Color onSurface = Color(0xFF0F172A); // High-contrast Slate 900
-  static const Color onSurfaceVariant = Color(0xFF64748B); // Slate 500
-  static const Color outlineColor = Color(0xFFE2E8F0);
-  static const Color outlineVariant = Color(0xFFCBD5E1);
+  static const Color onSurface = AppColors.textPrimary; // 0xFF0F172A
+  static const Color onSurfaceVariant = AppColors.onSurfaceVariant; // 0xFF64748B
+  static const Color outlineColor = AppColors.borderSubtle; // 0xFFE2E8F0
+  static const Color outlineVariant = AppColors.borderMedium; // 0xFFCBD5E1
 
-  // Gradients for High-Stress Emergency Controls
+  // -------------------------------------------------------------
+  // GRADIENTS
+  // -------------------------------------------------------------
   static const LinearGradient emergencyGradient = LinearGradient(
     colors: [Color(0xFFEF4444), Color(0xFFDC2626), Color(0xFFB91C1C)],
     begin: Alignment.topLeft,
@@ -105,8 +129,15 @@ class AppTheme {
     end: Alignment.bottomRight,
   );
 
-  // Shadows
-  static List<BoxShadow> glowShadow(Color color, {double blur = 24, double spread = 0, Offset offset = const Offset(0, 8)}) {
+  // -------------------------------------------------------------
+  // SHADOWS
+  // -------------------------------------------------------------
+  static List<BoxShadow> glowShadow(
+    Color color, {
+    double blur = 24,
+    double spread = 0,
+    Offset offset = const Offset(0, 8),
+  }) {
     return [
       BoxShadow(
         color: color.withValues(alpha: 0.35),
@@ -123,108 +154,158 @@ class AppTheme {
     ];
   }
 
+  /// Subtle card shadow (calm, non-harsh)
+  static List<BoxShadow> get cardShadow => const [
+    BoxShadow(
+      color: AppColors.shadowSubtle,
+      blurRadius: 10,
+      spreadRadius: 0,
+      offset: Offset(0, 2),
+    ),
+  ];
+
+  // -------------------------------------------------------------
+  // MATERIAL 3 LIGHT THEME SPECIFICATION
+  // -------------------------------------------------------------
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      fontFamily: 'Inter',
+      fontFamily: AppTypography.fontFamily,
+      textTheme: AppTypography.textTheme,
       colorScheme: const ColorScheme(
         brightness: Brightness.light,
-        primary: primaryNavy,
-        onPrimary: Colors.white,
-        primaryContainer: Color(0xFF1E293B),
-        onPrimaryContainer: Colors.white,
-        secondary: brandBlue,
-        onSecondary: Colors.white,
-        secondaryContainer: brandLightBlue,
-        onSecondaryContainer: Color(0xFF1E40AF),
-        tertiary: tertiaryAmber,
-        onTertiary: Colors.white,
-        tertiaryContainer: tertiaryContainerAmber,
-        onTertiaryContainer: onTertiaryContainer,
-        error: emergencyRed,
-        onError: Colors.white,
-        errorContainer: emergencyLightRed,
-        onErrorContainer: Color(0xFF991B1B),
-        surface: surfaceLight,
-        onSurface: onSurface,
-        onSurfaceVariant: onSurfaceVariant,
-        outline: outlineColor,
-        outlineVariant: outlineVariant,
+        primary: AppColors.deepNavy,
+        onPrimary: AppColors.textOnDark,
+        primaryContainer: AppColors.navy800,
+        onPrimaryContainer: AppColors.textOnDark,
+        secondary: AppColors.softBlue,
+        onSecondary: AppColors.onSoftBlue,
+        secondaryContainer: AppColors.softBlueLight,
+        onSecondaryContainer: AppColors.onSoftBlueContainer,
+        tertiary: AppColors.warningAmber,
+        onTertiary: AppColors.onAmber,
+        tertiaryContainer: AppColors.amberLight,
+        onTertiaryContainer: AppColors.onAmberContainer,
+        error: AppColors.emergencyRed,
+        onError: AppColors.onEmergency,
+        errorContainer: AppColors.emergencyContainer,
+        onErrorContainer: AppColors.onEmergencyContainer,
+        surface: AppColors.warmOffWhite,
+        onSurface: AppColors.textPrimary,
+        onSurfaceVariant: AppColors.onSurfaceVariant,
+        outline: AppColors.borderSubtle,
+        outlineVariant: AppColors.borderMedium,
       ),
-      scaffoldBackgroundColor: surfaceLight,
+      scaffoldBackgroundColor: AppColors.warmOffWhite,
       appBarTheme: const AppBarTheme(
-        backgroundColor: surfaceLight,
-        foregroundColor: primaryNavy,
+        backgroundColor: AppColors.warmOffWhite,
+        foregroundColor: AppColors.deepNavy,
         elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
-          fontFamily: 'Inter',
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          color: primaryNavy,
-          letterSpacing: 0.5,
+        titleTextStyle: AppTypography.pageHeading,
+        iconTheme: IconThemeData(
+          color: AppColors.deepNavy,
+          size: AppSpacing.iconMd,
         ),
-        iconTheme: IconThemeData(color: primaryNavy),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primaryNavy,
-          foregroundColor: Colors.white,
-          minimumSize: const Size(double.infinity, 52),
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          textStyle: const TextStyle(
-            fontFamily: 'Inter',
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
+          backgroundColor: AppColors.deepNavy,
+          foregroundColor: AppColors.textOnDark,
+          minimumSize: const Size(double.infinity, AppSpacing.buttonHeight),
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          shape: AppShapes.buttonShape,
+          textStyle: AppTypography.buttonText,
+          padding: AppSpacing.buttonPadding,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primaryNavy,
-          minimumSize: const Size(double.infinity, 52),
-          side: const BorderSide(color: outlineColor, width: 1.5),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          textStyle: const TextStyle(
-            fontFamily: 'Inter',
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
+          foregroundColor: AppColors.deepNavy,
+          minimumSize: const Size(double.infinity, AppSpacing.buttonHeight),
+          side: const BorderSide(color: AppColors.borderSubtle, width: 1.5),
+          shape: AppShapes.buttonShape,
+          textStyle: AppTypography.buttonText,
+          padding: AppSpacing.buttonPadding,
         ),
       ),
-      cardTheme: CardThemeData(
-        color: surfaceLowest,
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.softBlue,
+          textStyle: AppTypography.buttonText,
+          shape: AppShapes.buttonShape,
+        ),
+      ),
+      cardTheme: const CardThemeData(
+        color: AppColors.surfacePureWhite,
         elevation: 0,
+        margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: Color(0xFFE2E8F0), width: 1.2),
+          borderRadius: AppShapes.card,
+          side: BorderSide(color: AppColors.borderSubtle, width: 1.2),
         ),
       ),
-      inputDecorationTheme: InputDecorationTheme(
+      inputDecorationTheme: const InputDecorationTheme(
         filled: true,
-        fillColor: surfaceLowest,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        fillColor: AppColors.surfacePureWhite,
+        contentPadding: AppSpacing.inputPadding,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
+          borderRadius: AppShapes.input,
+          borderSide: BorderSide(color: AppColors.borderMedium, width: 1.2),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
+          borderRadius: AppShapes.input,
+          borderSide: BorderSide(color: AppColors.borderSubtle, width: 1.2),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: brandBlue, width: 2),
+          borderRadius: AppShapes.input,
+          borderSide: BorderSide(color: AppColors.softBlue, width: 2),
         ),
-        labelStyle: const TextStyle(color: onSurfaceVariant, fontSize: 14),
-        hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+        errorBorder: OutlineInputBorder(
+          borderRadius: AppShapes.input,
+          borderSide: BorderSide(color: AppColors.emergencyRed, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: AppShapes.input,
+          borderSide: BorderSide(color: AppColors.emergencyRed, width: 2),
+        ),
+        labelStyle: AppTypography.bodySecondary,
+        hintStyle: TextStyle(
+          fontFamily: AppTypography.fontFamily,
+          color: AppColors.textMuted,
+          fontSize: 14,
+        ),
+        errorStyle: TextStyle(
+          fontFamily: AppTypography.fontFamily,
+          color: AppColors.emergencyRed,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: AppColors.surfacePureWhite,
+        elevation: 0,
+        selectedItemColor: AppColors.deepNavy,
+        unselectedItemColor: AppColors.textMuted,
+        selectedLabelStyle: TextStyle(
+          fontFamily: AppTypography.fontFamily,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontFamily: AppTypography.fontFamily,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        type: BottomNavigationBarType.fixed,
+        showUnselectedLabels: true,
+      ),
+      dividerTheme: const DividerThemeData(
+        color: AppColors.divider,
+        thickness: 1,
+        space: 1,
       ),
     );
   }

@@ -172,13 +172,13 @@ class _SOSButtonState extends State<SOSButton> with TickerProviderStateMixin {
                       height: widget.size,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: AppTheme.emergencyGradient,
+                        color: AppTheme.emergencyRed,
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.emergencyRed.withValues(alpha: _isHolding ? 0.6 : 0.35),
-                            blurRadius: _isHolding ? 36 : 24,
-                            spreadRadius: _isHolding ? 6 : 2,
-                            offset: const Offset(0, 8),
+                            color: AppTheme.emergencyRed.withValues(alpha: _isHolding ? 0.5 : 0.3),
+                            blurRadius: _isHolding ? 32 : 20,
+                            spreadRadius: _isHolding ? 4 : 1,
+                            offset: const Offset(0, 6),
                           ),
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.15),

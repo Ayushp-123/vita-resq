@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_typography.dart';
+import '../../core/theme/app_status.dart';
 import '../../core/navigation/app_navigator.dart';
 import '../../services/local_database_service.dart';
-
 import '../../models/emergency_model.dart';
+import '../../widgets/common/app_bottom_nav_bar.dart';
+import '../../widgets/common/app_status_badge.dart';
 
 class EmergencyHistoryFilter {
   static List<EmergencyModel> filterHelpAsked(List<EmergencyModel> emergencies, String currentUserId) {
@@ -28,7 +31,17 @@ class EmergencyHistoryFilter {
 
 class EmergencyHistoryScreen extends StatefulWidget {
   final VoidCallback? onBackPressed;
-  const EmergencyHistoryScreen({super.key, this.onBackPressed});
+  final int initialTabIndex;
+  final String? initialUserId;
+  final List<EmergencyModel>? initialEmergencies;
+
+  const EmergencyHistoryScreen({
+    super.key,
+    this.onBackPressed,
+    this.initialTabIndex = 0,
+    this.initialUserId,
+    this.initialEmergencies,
+  });
 
   @override
   State<EmergencyHistoryScreen> createState() => _EmergencyHistoryScreenState();
@@ -40,7 +53,11 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 1),
+    );
   }
 
   @override
@@ -49,63 +66,27 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
     super.dispose();
   }
 
-  Widget _buildStatusChip(String status) {
-    String upper = status.toUpperCase();
-    bool isCompleted = upper == 'COMPLETED' || upper == 'RESOLVED' || upper == 'ENDED' || upper == 'ARRIVED';
-    bool isCancelled = upper == 'CANCELLED';
-    bool isSearching = upper == 'SEARCHING';
+  Widget _buildStatusBadge(String status) {
+    final upper = status.toUpperCase();
+    AppStatusType statusType;
+    if (upper == 'COMPLETED' || upper == 'RESOLVED' || upper == 'ENDED') {
+      statusType = AppStatusType.completed;
+    } else if (upper == 'ARRIVED') {
+      statusType = AppStatusType.success;
+    } else if (upper == 'SEARCHING') {
+      statusType = AppStatusType.emergency;
+    } else if (upper == 'ASSIGNED' || upper == 'APPROACHING') {
+      statusType = AppStatusType.warning;
+    } else if (upper == 'CANCELLED') {
+      statusType = AppStatusType.normal;
+    } else {
+      statusType = AppStatusType.normal;
+    }
 
-    Color bgColor = isCompleted
-        ? const Color(0xFFD1FAE5)
-        : isCancelled
-            ? const Color(0xFFF1F5F9)
-            : isSearching
-                ? const Color(0xFFFEF2F2)
-                : const Color(0xFFEFF6FF);
-    Color textColor = isCompleted
-        ? const Color(0xFF065F46)
-        : isCancelled
-            ? const Color(0xFF64748B)
-            : isSearching
-                ? AppTheme.emergencyRed
-                : AppTheme.brandBlue;
-    Color dotColor = isCompleted
-        ? AppTheme.emeraldGreen
-        : isCancelled
-            ? const Color(0xFF94A3B8)
-            : isSearching
-                ? AppTheme.emergencyRed
-                : AppTheme.brandBlue;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: dotColor,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            upper,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              color: textColor,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ],
-      ),
+    return AppStatusBadge(
+      status: statusType,
+      customLabel: upper,
+      isCompact: true,
     );
   }
 
@@ -120,65 +101,79 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
     required bool isHelpAsked,
     String? roleText,
   }) {
-    String dateStr =
+    final dateStr =
         '${createdAt.day.toString().padLeft(2, '0')}/${createdAt.month.toString().padLeft(2, '0')}/${createdAt.year} • ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}';
+
+    final isOffline = id.startsWith('JS-OFF-');
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE2E8F0), width: 1.2),
-        boxShadow: [
+        color: AppColors.surfacePureWhite,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderSubtle, width: 1.0),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: Color(0x080F172A),
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
         ],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           onTap: () {
             AppNavigator.navigateToEmergencyDetails(context, id);
           },
           child: Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(14.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Top row: Date/Time + Status Badge
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      dateStr,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: Text(
+                        dateStr,
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    _buildStatusChip(status),
+                    const SizedBox(width: 8),
+                    _buildStatusBadge(status),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
+
+                // Main Identity Row: Icon + Type Title + Optional Role
                 Row(
                   children: [
                     Container(
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
                         color: isHelpAsked
-                            ? AppTheme.primaryRed.withValues(alpha: 0.1)
-                            : AppTheme.secondaryBlue.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
+                            ? AppColors.emergencyLightRed
+                            : AppColors.softBlueLight,
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
-                        isHelpAsked ? Icons.emergency_rounded : Icons.volunteer_activism_rounded,
-                        color: isHelpAsked ? AppTheme.primaryRed : AppTheme.secondaryBlue,
+                        isHelpAsked
+                            ? Icons.emergency_outlined
+                            : Icons.volunteer_activism_outlined,
+                        color: isHelpAsked
+                            ? AppColors.emergencyRed
+                            : AppColors.softBlueDark,
                         size: 20,
                       ),
                     ),
@@ -189,21 +184,25 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
                         children: [
                           Text(
                             isHelpAsked ? '$type Emergency SOS' : 'Assisted in $type Emergency',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.onSurface,
+                            style: AppTypography.subheading.copyWith(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.deepNavy,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           if (roleText != null && roleText.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
                               'Role: $roleText',
-                              style: const TextStyle(
-                                fontSize: 12,
+                              style: AppTypography.caption.copyWith(
+                                fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: AppTheme.secondaryBlue,
+                                color: AppColors.softBlueDark,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ],
@@ -212,20 +211,30 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
                   ],
                 ),
                 const SizedBox(height: 12),
+
+                // Context Location Container
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
-                    color: AppTheme.surfaceLow,
-                    borderRadius: BorderRadius.circular(10),
+                    color: AppColors.subtleBlueGray,
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.pin_drop_rounded, size: 14, color: AppTheme.onSurfaceVariant),
+                      const Icon(
+                        Icons.location_on_outlined,
+                        size: 13,
+                        color: AppColors.textMuted,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)} (GPS Coordinates)',
-                          style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant, fontWeight: FontWeight.w500),
+                          style: AppTypography.caption.copyWith(
+                            fontSize: 11.5,
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -233,35 +242,55 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
                     ],
                   ),
                 ),
-                const Divider(height: 20),
+                const SizedBox(height: 12),
+
+                // Footer Row: Transport channel + View Details action
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          id.startsWith('JS-OFF-') ? Icons.wifi_off : Icons.cloud_done_outlined,
-                          size: 14,
-                          color: AppTheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          id.startsWith('JS-OFF-') ? 'Offline P2P' : 'Cloud Network',
-                          style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
-                        ),
-                      ],
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isOffline ? Icons.wifi_off_rounded : Icons.cloud_done_outlined,
+                            size: 13,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              isOffline ? 'Offline P2P' : 'Cloud Network',
+                              style: AppTypography.caption.copyWith(
+                                fontSize: 11.5,
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const Row(
+                    const SizedBox(width: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           'View Details',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primaryRed,
+                          style: AppTypography.caption.copyWith(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.emergencyRed,
                           ),
                         ),
-                        Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryRed),
+                        const SizedBox(width: 2),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 16,
+                          color: AppColors.emergencyRed,
+                        ),
                       ],
                     ),
                   ],
@@ -280,30 +309,40 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
     required String subtitle,
   }) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 48.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
-              decoration: const BoxDecoration(
-                color: AppTheme.surfaceLow,
-                shape: BoxShape.circle,
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: AppColors.subtleBlueGray,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.borderSubtle, width: 1.0),
               ),
-              child: Icon(icon, size: 40, color: AppTheme.outlineColor.withValues(alpha: 0.6)),
+              child: Icon(icon, size: 32, color: AppColors.textMuted),
             ),
             const SizedBox(height: 16),
             Text(
               title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.onSurface),
+              style: AppTypography.subheading.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.deepNavy,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 6),
             Text(
               subtitle,
-              style: const TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant, height: 1.3),
+              style: AppTypography.bodySecondary.copyWith(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -312,18 +351,272 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
     );
   }
 
+  Widget _buildHelpAskedList(String uid) {
+    if (widget.initialEmergencies != null) {
+      final list = EmergencyHistoryFilter.filterHelpAsked(widget.initialEmergencies!, uid);
+      if (list.isEmpty) {
+        return _buildEmptyState(
+          icon: Icons.shield_outlined,
+          title: 'No SOS requests yet',
+          subtitle: 'Any emergency alerts you trigger will appear in this log.',
+        );
+      }
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: list.length,
+        itemBuilder: (context, index) {
+          final emergency = list[index];
+          return _buildEmergencyCard(
+            context: context,
+            id: emergency.id,
+            type: emergency.type,
+            status: emergency.status.name,
+            latitude: emergency.latitude,
+            longitude: emergency.longitude,
+            createdAt: emergency.createdAt,
+            isHelpAsked: true,
+          );
+        },
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('emergencies')
+          .where('victimId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator(color: AppColors.brandBlue));
+        }
+
+        var docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? []);
+        if (docs.isEmpty || snapshot.hasError) {
+          return FutureBuilder<List<EmergencyModel>>(
+            future: LocalDatabaseService().getAllLocalEmergencies(),
+            builder: (context, localSnapshot) {
+              var localList = EmergencyHistoryFilter.filterHelpAsked(
+                localSnapshot.data ?? [],
+                uid,
+              );
+
+              if (localList.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.shield_outlined,
+                  title: 'No SOS requests yet',
+                  subtitle: 'Any emergency alerts you trigger will appear in this log.',
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: localList.length,
+                itemBuilder: (context, index) {
+                  var emergency = localList[index];
+                  return _buildEmergencyCard(
+                    context: context,
+                    id: emergency.id,
+                    type: emergency.type,
+                    status: emergency.status.name,
+                    latitude: emergency.latitude,
+                    longitude: emergency.longitude,
+                    createdAt: emergency.createdAt,
+                    isHelpAsked: true,
+                  );
+                },
+              );
+            },
+          );
+        }
+
+        docs.sort((a, b) {
+          var aMap = a.data() as Map<String, dynamic>;
+          var bMap = b.data() as Map<String, dynamic>;
+          var aDate = EmergencyModel.parseDate(aMap['createdAt']);
+          var bDate = EmergencyModel.parseDate(bMap['createdAt']);
+          return bDate.compareTo(aDate);
+        });
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            var data = docs[index].data() as Map<String, dynamic>;
+            String docId = docs[index].id;
+            DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
+            String status = (data['status'] ?? 'COMPLETED').toString();
+            String type = (data['type'] ?? 'Medical').toString();
+            double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+            double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+
+            return _buildEmergencyCard(
+              context: context,
+              id: docId,
+              type: type,
+              status: status,
+              latitude: lat,
+              longitude: lon,
+              createdAt: createdAt,
+              isHelpAsked: true,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildVictimsHelpedList(String uid) {
+    if (widget.initialEmergencies != null) {
+      final list = EmergencyHistoryFilter.filterVictimsHelped(widget.initialEmergencies!, uid);
+      if (list.isEmpty) {
+        return _buildEmptyState(
+          icon: Icons.volunteer_activism_outlined,
+          title: 'No rescues yet',
+          subtitle: 'Emergencies where you respond and assist will appear here.',
+        );
+      }
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: list.length,
+        itemBuilder: (context, index) {
+          final emergency = list[index];
+          String? roleStr;
+          if (emergency.responders.containsKey(uid)) {
+            roleStr = emergency.responders[uid]!.role.name;
+          }
+          return _buildEmergencyCard(
+            context: context,
+            id: emergency.id,
+            type: emergency.type,
+            status: emergency.status.name,
+            latitude: emergency.latitude,
+            longitude: emergency.longitude,
+            createdAt: emergency.createdAt,
+            isHelpAsked: false,
+            roleText: roleStr,
+          );
+        },
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('emergencies')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator(color: AppColors.brandBlue));
+        }
+
+        var allDocs = snapshot.data?.docs ?? [];
+        var helpedDocs = allDocs.where((doc) {
+          var data = doc.data() as Map<String, dynamic>;
+          String victimId = data['victimId'] ?? '';
+          if (victimId == uid) return false;
+
+          String helperId = data['helperId'] ?? '';
+          Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
+          return helperId == uid || responders.containsKey(uid);
+        }).toList();
+
+        if (helpedDocs.isEmpty) {
+          return FutureBuilder<List<EmergencyModel>>(
+            future: LocalDatabaseService().getAllLocalEmergencies(),
+            builder: (context, localSnapshot) {
+              var localList = EmergencyHistoryFilter.filterVictimsHelped(
+                localSnapshot.data ?? [],
+                uid,
+              );
+
+              if (localList.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.volunteer_activism_outlined,
+                  title: 'No rescues yet',
+                  subtitle: 'Emergencies where you respond and assist will appear here.',
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: localList.length,
+                itemBuilder: (context, index) {
+                  var emergency = localList[index];
+                  String? roleStr;
+                  if (emergency.responders.containsKey(uid)) {
+                    roleStr = emergency.responders[uid]!.role.name;
+                  }
+                  return _buildEmergencyCard(
+                    context: context,
+                    id: emergency.id,
+                    type: emergency.type,
+                    status: emergency.status.name,
+                    latitude: emergency.latitude,
+                    longitude: emergency.longitude,
+                    createdAt: emergency.createdAt,
+                    isHelpAsked: false,
+                    roleText: roleStr,
+                  );
+                },
+              );
+            },
+          );
+        }
+
+        helpedDocs.sort((a, b) {
+          var aMap = a.data() as Map<String, dynamic>;
+          var bMap = b.data() as Map<String, dynamic>;
+          var aDate = EmergencyModel.parseDate(aMap['createdAt']);
+          var bDate = EmergencyModel.parseDate(bMap['createdAt']);
+          return bDate.compareTo(aDate);
+        });
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: helpedDocs.length,
+          itemBuilder: (context, index) {
+            var data = helpedDocs[index].data() as Map<String, dynamic>;
+            String docId = helpedDocs[index].id;
+            DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
+            String status = (data['status'] ?? 'COMPLETED').toString();
+            String type = (data['type'] ?? 'Medical').toString();
+            double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+            double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+
+            Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
+            String? roleText;
+            if (responders.containsKey(uid)) {
+              roleText = (responders[uid] as Map<String, dynamic>)['role']?.toString();
+            }
+
+            return _buildEmergencyCard(
+              context: context,
+              id: docId,
+              type: type,
+              status: status,
+              latitude: lat,
+              longitude: lon,
+              createdAt: createdAt,
+              isHelpAsked: false,
+              roleText: roleText,
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final authUser = FirebaseAuth.instance.currentUser;
-    String uid = authUser?.uid ?? '';
+    String uid = widget.initialUserId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
 
     return Scaffold(
-      backgroundColor: AppTheme.surfaceLight,
+      backgroundColor: AppColors.warmOffWhite,
       appBar: AppBar(
-        backgroundColor: AppTheme.primaryNavy,
+        backgroundColor: AppColors.warmOffWhite,
         elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.deepNavy),
           tooltip: 'Back',
           onPressed: () {
             if (widget.onBackPressed != null) {
@@ -335,281 +628,133 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
             }
           },
         ),
-        title: const Text(
-          'EMERGENCY HISTORY',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w900,
+        title: Text(
+          'Emergency History',
+          style: AppTypography.sectionHeading.copyWith(
             fontSize: 18,
-            letterSpacing: 0.8,
+            fontWeight: FontWeight.w700,
+            color: AppColors.deepNavy,
           ),
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              indicator: BoxDecoration(
-                color: AppTheme.brandBlue,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.brandBlue.withValues(alpha: 0.4),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              labelColor: Colors.white,
-              unselectedLabelColor: const Color(0xFF94A3B8),
-              labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              indicatorSize: TabBarIndicatorSize.tab,
-              dividerColor: Colors.transparent,
-              tabs: const [
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.shield_outlined, size: 16),
-                      SizedBox(width: 6),
-                      Text('Help Asked (SOS)'),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.volunteer_activism_outlined, size: 16),
-                      SizedBox(width: 6),
-                      Text('Victims Helped'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        centerTitle: false,
+      ),
+      bottomNavigationBar: AppBottomNavBar(
+        currentIndex: 1,
+        onTap: (index) {
+          if (index == 0) {
+            if (widget.onBackPressed != null) {
+              widget.onBackPressed!();
+            } else {
+              AppNavigator.navigateToHome(context);
+            }
+          } else if (index == 2) {
+            AppNavigator.navigateToProfile(context);
+          }
+        },
       ),
       body: SafeArea(
-        child: uid.isEmpty
-            ? TabBarView(
+        child: Column(
+          children: [
+            // Segmented pill tab switcher
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.subtleBlueGray,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.borderSubtle, width: 1.0),
+              ),
+              child: TabBar(
                 controller: _tabController,
-                children: [
-                  _buildEmptyState(
-                    icon: Icons.shield_outlined,
-                    title: 'No SOS Requests Made',
-                    subtitle: 'Sign in to access your personal emergency dispatch records.',
+                indicator: BoxDecoration(
+                  color: AppColors.surfacePureWhite,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x0A0F172A),
+                      blurRadius: 4,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
+                ),
+                labelColor: AppColors.deepNavy,
+                unselectedLabelColor: AppColors.textSecondary,
+                labelStyle: AppTypography.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+                unselectedLabelStyle: AppTypography.caption.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                labelPadding: EdgeInsets.zero,
+                splashFactory: NoSplash.splashFactory,
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                tabs: const [
+                  Tab(
+                    height: 38,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.shield_outlined, size: 16),
+                          SizedBox(width: 5),
+                          Text('Help Asked'),
+                        ],
+                      ),
+                    ),
                   ),
-                  _buildEmptyState(
-                    icon: Icons.volunteer_activism_outlined,
-                    title: 'No Rescue Logs Yet',
-                    subtitle: 'Sign in to track emergencies where you assist as a responder.',
-                  ),
-                ],
-              )
-            : TabBarView(
-                controller: _tabController,
-                children: [
-                  // TAB 1: HELP ASKED (User was Victim)
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('emergencies')
-                        .where('victimId', isEqualTo: uid)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator(color: AppTheme.brandBlue));
-                      }
-
-                      var docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? []);
-                      if (docs.isEmpty || snapshot.hasError) {
-                        return FutureBuilder<List<EmergencyModel>>(
-                          future: LocalDatabaseService().getAllLocalEmergencies(),
-                          builder: (context, localSnapshot) {
-                            var localList = EmergencyHistoryFilter.filterHelpAsked(
-                              localSnapshot.data ?? [],
-                              uid,
-                            );
-
-                            if (localList.isEmpty) {
-                              return _buildEmptyState(
-                                icon: Icons.shield_outlined,
-                                title: 'No SOS Requests Made',
-                                subtitle: 'Any emergency alerts you trigger will appear in this log.',
-                              );
-                            }
-
-                            return ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: localList.length,
-                              itemBuilder: (context, index) {
-                                var emergency = localList[index];
-                                return _buildEmergencyCard(
-                                  context: context,
-                                  id: emergency.id,
-                                  type: emergency.type,
-                                  status: emergency.status.name,
-                                  latitude: emergency.latitude,
-                                  longitude: emergency.longitude,
-                                  createdAt: emergency.createdAt,
-                                  isHelpAsked: true,
-                                );
-                              },
-                            );
-                          },
-                        );
-                      }
-
-                      // Sort online docs by createdAt descending
-                      docs.sort((a, b) {
-                        var aMap = a.data() as Map<String, dynamic>;
-                        var bMap = b.data() as Map<String, dynamic>;
-                        var aDate = EmergencyModel.parseDate(aMap['createdAt']);
-                        var bDate = EmergencyModel.parseDate(bMap['createdAt']);
-                        return bDate.compareTo(aDate);
-                      });
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: docs.length,
-                        itemBuilder: (context, index) {
-                          var data = docs[index].data() as Map<String, dynamic>;
-                          String docId = docs[index].id;
-                          DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
-                          String status = (data['status'] ?? 'COMPLETED').toString();
-                          String type = (data['type'] ?? 'Medical').toString();
-                          double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
-                          double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-                          return _buildEmergencyCard(
-                            context: context,
-                            id: docId,
-                            type: type,
-                            status: status,
-                            latitude: lat,
-                            longitude: lon,
-                            createdAt: createdAt,
-                            isHelpAsked: true,
-                          );
-                        },
-                      );
-                    },
-                  ),
-
-                  // TAB 2: VICTIMS HELPED (User was Responder)
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('emergencies')
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator(color: AppTheme.brandBlue));
-                      }
-
-                      var allDocs = snapshot.data?.docs ?? [];
-                      var helpedDocs = allDocs.where((doc) {
-                        var data = doc.data() as Map<String, dynamic>;
-                        String victimId = data['victimId'] ?? '';
-                        if (victimId == uid) return false; // Never show own emergency
-
-                        String helperId = data['helperId'] ?? '';
-                        Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
-                        return helperId == uid || responders.containsKey(uid);
-                      }).toList();
-
-                      if (helpedDocs.isEmpty) {
-                        return FutureBuilder<List<EmergencyModel>>(
-                          future: LocalDatabaseService().getAllLocalEmergencies(),
-                          builder: (context, localSnapshot) {
-                            var localList = EmergencyHistoryFilter.filterVictimsHelped(
-                              localSnapshot.data ?? [],
-                              uid,
-                            );
-
-                            if (localList.isEmpty) {
-                              return _buildEmptyState(
-                                icon: Icons.volunteer_activism_outlined,
-                                title: 'No Rescue Logs Yet',
-                                subtitle: 'Emergencies where you respond and assist as a volunteer will appear here.',
-                              );
-                            }
-
-                            return ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: localList.length,
-                              itemBuilder: (context, index) {
-                                var emergency = localList[index];
-                                String? roleStr;
-                                if (emergency.responders.containsKey(uid)) {
-                                  roleStr = emergency.responders[uid]!.role.name;
-                                }
-                                return _buildEmergencyCard(
-                                  context: context,
-                                  id: emergency.id,
-                                  type: emergency.type,
-                                  status: emergency.status.name,
-                                  latitude: emergency.latitude,
-                                  longitude: emergency.longitude,
-                                  createdAt: emergency.createdAt,
-                                  isHelpAsked: false,
-                                  roleText: roleStr,
-                                );
-                              },
-                            );
-                          },
-                        );
-                      }
-
-                      // Sort helped docs by createdAt descending
-                      helpedDocs.sort((a, b) {
-                        var aMap = a.data() as Map<String, dynamic>;
-                        var bMap = b.data() as Map<String, dynamic>;
-                        var aDate = EmergencyModel.parseDate(aMap['createdAt']);
-                        var bDate = EmergencyModel.parseDate(bMap['createdAt']);
-                        return bDate.compareTo(aDate);
-                      });
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: helpedDocs.length,
-                        itemBuilder: (context, index) {
-                          var data = helpedDocs[index].data() as Map<String, dynamic>;
-                          String docId = helpedDocs[index].id;
-                          DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
-                          String status = (data['status'] ?? 'COMPLETED').toString();
-                          String type = (data['type'] ?? 'Medical').toString();
-                          double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
-                          double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-                          Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
-                          String? roleText;
-                          if (responders.containsKey(uid)) {
-                            roleText = (responders[uid] as Map<String, dynamic>)['role']?.toString();
-                          }
-
-                          return _buildEmergencyCard(
-                            context: context,
-                            id: docId,
-                            type: type,
-                            status: status,
-                            latitude: lat,
-                            longitude: lon,
-                            createdAt: createdAt,
-                            isHelpAsked: false,
-                            roleText: roleText,
-                          );
-                        },
-                      );
-                    },
+                  Tab(
+                    height: 38,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.volunteer_activism_outlined, size: 16),
+                          SizedBox(width: 5),
+                          Text('Victims Helped'),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
+            ),
+
+            // Tab Views
+            Expanded(
+              child: uid.isEmpty
+                  ? TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildEmptyState(
+                          icon: Icons.shield_outlined,
+                          title: 'No SOS requests yet',
+                          subtitle: 'Sign in to access your personal emergency dispatch records.',
+                        ),
+                        _buildEmptyState(
+                          icon: Icons.volunteer_activism_outlined,
+                          title: 'No rescues yet',
+                          subtitle: 'Sign in to track emergencies where you assist as a responder.',
+                        ),
+                      ],
+                    )
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildHelpAskedList(uid),
+                        _buildVictimsHelpedList(uid),
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

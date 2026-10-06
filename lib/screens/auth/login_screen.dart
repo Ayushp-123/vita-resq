@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import '../../services/app_permissions_service.dart';
 import '../../widgets/permission_request_dialog.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/navigation/app_navigator.dart';
+import '../../widgets/common/app_feedback.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,9 +37,7 @@ class _LoginScreenState extends State<LoginScreen> {
     String password = _passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter both email and password.')),
-      );
+      AppSnackbar.showWarning(context, 'Please enter both email and password.');
       return;
     }
 
@@ -50,10 +50,36 @@ class _LoginScreenState extends State<LoginScreen> {
       await AppPermissionsService().requestAllPermissions();
       if (!mounted) return;
       AppNavigator.navigateToHome(context);
-    } catch (e) {
+    } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login failed: ${e.toString()}')),
+      String message;
+      switch (e.code) {
+        case 'user-not-found':
+        case 'wrong-password':
+        case 'invalid-credential':
+          message = 'Incorrect email or password. Please verify your credentials.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address format.';
+          break;
+        case 'user-disabled':
+          message = 'This account has been disabled. Please contact support.';
+          break;
+        case 'too-many-requests':
+          message = 'Too many failed login attempts. Please try again shortly.';
+          break;
+        case 'network-request-failed':
+          message = 'Network unavailable. Please check your internet connection.';
+          break;
+        default:
+          message = 'Unable to sign in. Please verify your email and password.';
+      }
+      AppSnackbar.showError(context, message);
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbar.showError(
+        context,
+        'Unable to sign in. Please check your network connection and try again.',
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -218,9 +244,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(48, 48),
+                                  tapTargetSize: MaterialTapTargetSize.padded,
+                                ),
                                 onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Please contact your administrator for password reset.')),
+                                  AppSnackbar.showInfo(
+                                    context,
+                                    'Please contact your system administrator to reset credentials.',
                                   );
                                 },
                                 child: const Text(
@@ -235,25 +266,36 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Login Action Button
-                            _isLoading
-                                ? const Center(child: CircularProgressIndicator())
-                                : ElevatedButton(
-                                    onPressed: _login,
-                                    child: const Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text('LOGIN'),
-                                        SizedBox(width: 8),
-                                        Icon(Icons.arrow_forward, size: 20),
-                                      ],
-                                    ),
-                                  ),
+                            // Login Action Button (Fixed height prevents layout collapse during loading)
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton(
+                                onPressed: _isLoading ? null : _login,
+                                child: _isLoading
+                                    ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text('LOGIN'),
+                                          SizedBox(width: 8),
+                                          Icon(Icons.arrow_forward, size: 20),
+                                        ],
+                                      ),
+                              ),
+                            ),
                             const SizedBox(height: 20),
 
-                            // Create Account Link
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                            // Create Account Link (Wrap prevents overflow on compact screens)
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 const Text(
                                   "Don't have an account?",

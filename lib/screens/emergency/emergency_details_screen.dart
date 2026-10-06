@@ -6,15 +6,26 @@ import '../../services/local_database_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/emergency_model.dart';
 import '../../models/responder_model.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_typography.dart';
+import '../../core/theme/app_shapes.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_status.dart';
 import '../../widgets/app_state_widgets.dart';
 import '../../widgets/app_dialogs.dart';
+import '../../widgets/common/app_status_badge.dart';
 import '../../widgets/map_widget.dart';
 import '../../core/navigation/app_navigator.dart';
 
 class EmergencyDetailsScreen extends StatefulWidget {
   final String emergencyId;
-  const EmergencyDetailsScreen({super.key, required this.emergencyId});
+  final EmergencyModel? initialEmergency;
+
+  const EmergencyDetailsScreen({
+    super.key,
+    required this.emergencyId,
+    this.initialEmergency,
+  });
 
   @override
   State<EmergencyDetailsScreen> createState() => _EmergencyDetailsScreenState();
@@ -45,23 +56,17 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
     if (!mounted) return;
 
     if (role != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            widget.emergencyId.startsWith('JS-OFF-')
-                ? 'Accepted offline emergency as ${role.name} (Direct P2P mode)'
-                : 'Accepted emergency response as ${role.name}',
-          ),
-          backgroundColor: Colors.green,
-        ),
+      AppSnackbar.showSuccess(
+        context,
+        widget.emergencyId.startsWith('JS-OFF-')
+            ? 'Accepted offline emergency as ${role.name} (Direct P2P)'
+            : 'Accepted emergency response as ${role.name}',
       );
       AppNavigator.replaceWithEmergencyMap(context, widget.emergencyId);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This emergency is no longer active.'),
-          backgroundColor: AppTheme.errorRed,
-        ),
+      AppSnackbar.showWarning(
+        context,
+        'This emergency is no longer active.',
       );
       if (mounted) setState(() => _isClaiming = false);
     }
@@ -73,22 +78,23 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.white, size: 14),
-          const SizedBox(width: 6),
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 5),
           Text(
             label.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: color,
             ),
           ),
         ],
@@ -108,45 +114,29 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
     bool isCompleted = emergency.status == EmergencyStatus.COMPLETED;
 
     return Scaffold(
+      backgroundColor: AppColors.warmOffWhite,
       appBar: AppBar(
+        backgroundColor: AppColors.surfacePureWhite,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.close, color: AppTheme.onSurface),
+          icon: const Icon(Icons.close_rounded, color: AppColors.deepNavy),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isCancelled
-                    ? const Color(0xFF94A3B8)
-                    : isCompleted
-                        ? const Color(0xFF10B981)
-                        : AppTheme.primaryRed,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              isCancelled
-                  ? 'CANCELLED ALERT'
-                  : isCompleted
-                      ? 'RESOLVED ALERT'
-                      : 'LIVE ALERT',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-                color: isCancelled
-                    ? const Color(0xFF64748B)
-                    : isCompleted
-                        ? const Color(0xFF065F46)
-                        : AppTheme.primaryRed,
-              ),
-            ),
-          ],
+        title: Text(
+          isCancelled
+              ? 'Cancelled Alert'
+              : isCompleted
+                  ? 'Resolved Alert'
+                  : 'Emergency Details',
+          style: AppTypography.subheading.copyWith(
+            fontWeight: FontWeight.bold,
+            color: AppColors.deepNavy,
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: AppColors.borderSubtle, height: 1),
         ),
       ),
       body: SafeArea(
@@ -154,146 +144,188 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20.0),
+                padding: const EdgeInsets.all(18.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Headline & Stage Distance
+                    // SECTION: EMERGENCY
                     Text(
-                      isCancelled
-                          ? 'CANCELLED EMERGENCY'
-                          : isCompleted
-                              ? 'RESOLVED EMERGENCY'
-                              : 'NEARBY EMERGENCY',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: isCancelled
-                            ? const Color(0xFF64748B)
-                            : isCompleted
-                                ? const Color(0xFF065F46)
-                                : AppTheme.primaryRed,
-                        letterSpacing: 0.5,
+                      'EMERGENCY',
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.8,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
+                    const SizedBox(height: 6),
+                    // Status Badge & Emergency Type
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
                       children: [
-                        Text(
-                          radiusStageText,
-                          style: const TextStyle(
-                            fontSize: 40,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.onSurface,
-                          ),
+                        AppStatusBadge(
+                          status: isCancelled
+                              ? AppStatusType.normal
+                              : isCompleted
+                                  ? AppStatusType.success
+                                  : AppStatusType.emergency,
+                          customLabel: isCancelled
+                              ? 'CANCELLED ALERT'
+                              : isCompleted
+                                  ? 'RESOLVED ALERT'
+                                  : 'LIVE ALERT',
                         ),
-                        const SizedBox(width: 14),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: (isCancelled || isCompleted)
-                                ? const Color(0xFFE2E8F0)
-                                : AppTheme.secondaryContainerBlue.withValues(alpha: 0.3),
-                            borderRadius: BorderRadius.circular(16),
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.borderSubtle),
                           ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isCancelled
-                                    ? Icons.cancel
-                                    : isCompleted
-                                        ? Icons.check_circle
-                                        : Icons.radar,
-                                size: 16,
-                                color: isCancelled
-                                    ? const Color(0xFF64748B)
-                                    : isCompleted
-                                        ? const Color(0xFF065F46)
-                                        : AppTheme.secondaryBlue,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                isCancelled
-                                    ? 'Cancelled'
-                                    : isCompleted
-                                        ? 'Resolved'
-                                        : emergency.status == EmergencyStatus.ARRIVED
-                                            ? 'Arrived'
-                                            : emergency.status == EmergencyStatus.APPROACHING
-                                                ? 'Approaching'
-                                                : emergency.status == EmergencyStatus.ASSIGNED
-                                                    ? 'Assigned'
-                                                    : 'Searching...',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: isCancelled
-                                      ? const Color(0xFF64748B)
-                                      : isCompleted
-                                          ? const Color(0xFF065F46)
-                                          : emergency.status == EmergencyStatus.ARRIVED
-                                              ? AppTheme.emeraldGreen
-                                              : emergency.status == EmergencyStatus.APPROACHING || emergency.status == EmergencyStatus.ASSIGNED
-                                                  ? AppTheme.brandBlue
-                                                  : AppTheme.emergencyRed,
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            emergency.type.toUpperCase(),
+                            style: AppTypography.caption.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.deepNavy,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    AppSpacing.gapVerticalMd,
 
+                    Text(
+                      isCancelled
+                          ? 'Cancelled Emergency'
+                          : isCompleted
+                              ? 'Resolved Emergency'
+                              : 'Nearby Emergency Request',
+                      style: AppTypography.sectionHeading.copyWith(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.deepNavy,
+                      ),
+                    ),
+                    AppSpacing.gapVerticalLg,
+
+                    // SECTION: LOCATION
+                    Text(
+                      'LOCATION',
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfacePureWhite,
+                        borderRadius: AppShapes.card,
+                        border: Border.all(color: AppColors.borderSubtle),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceLight,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.location_on_outlined, color: AppColors.brandBlue, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  radiusStageText,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.deepNavy,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Approximate victim location • broadcast stage',
+                                  style: AppTypography.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    AppSpacing.gapVerticalLg,
+
+                    // SECTION: MAP
+                    Text(
+                      'MAP',
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                     // Map Preview Card
                     Container(
-                      height: 200,
+                      height: 190,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.surfaceHighest),
+                        borderRadius: AppShapes.card,
+                        border: Border.all(color: AppColors.borderSubtle),
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: AppShapes.card,
                         child: RealMapWidget(
                           centerLatLng: LatLng(emergency.latitude, emergency.longitude),
                           initialZoom: 15.0,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    AppSpacing.gapVerticalLg,
 
-                    // Role Badges or Closed Summary Section
+                    // SECTION: IMPORTANT DETAILS
+                    Text(
+                      'IMPORTANT DETAILS',
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Roles or Closed Summary Section
                     if (isCancelled || isCompleted) ...[
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: AppTheme.surfaceLow,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppTheme.surfaceHighest),
+                          color: AppColors.surfacePureWhite,
+                          borderRadius: AppShapes.card,
+                          border: Border.all(color: AppColors.borderSubtle),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'INCIDENT LOG SUMMARY',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.onSurfaceVariant,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
                             Text(
                               isCancelled
                                   ? 'This incident was cancelled. No further volunteer response is permitted.'
-                                  : 'This emergency was successfully handled. The victim received assistance.',
-                              style: const TextStyle(fontSize: 13, color: AppTheme.onSurface),
+                                  : 'This emergency was successfully handled and closed.',
+                              style: AppTypography.body.copyWith(fontSize: 13),
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Logged At: ${emergency.createdAt.day}/${emergency.createdAt.month}/${emergency.createdAt.year} • ${emergency.createdAt.hour.toString().padLeft(2, '0')}:${emergency.createdAt.minute.toString().padLeft(2, '0')}',
-                              style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+                              'Logged: ${emergency.createdAt.day}/${emergency.createdAt.month}/${emergency.createdAt.year} • ${emergency.createdAt.hour.toString().padLeft(2, '0')}:${emergency.createdAt.minute.toString().padLeft(2, '0')}',
+                              style: AppTypography.caption.copyWith(color: AppColors.textMuted),
                             ),
                           ],
                         ),
@@ -302,23 +334,13 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: AppTheme.surfaceLow,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppTheme.surfaceHighest),
+                          color: AppColors.surfacePureWhite,
+                          borderRadius: AppShapes.card,
+                          border: Border.all(color: AppColors.borderSubtle),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'RESPONDER ROLES AVAILABLE',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.onSurfaceVariant,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
@@ -326,17 +348,17 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                                 _buildRoleBadge(
                                   icon: Icons.medical_services_outlined,
                                   label: 'Primary',
-                                  color: AppTheme.primaryRed,
+                                  color: AppColors.emergencyRed,
                                 ),
                                 _buildRoleBadge(
                                   icon: Icons.health_and_safety_outlined,
                                   label: 'Secondary',
-                                  color: AppTheme.tertiaryAmber,
+                                  color: AppColors.warningAmber,
                                 ),
                                 _buildRoleBadge(
                                   icon: Icons.hourglass_empty,
                                   label: 'Standby',
-                                  color: AppTheme.secondaryBlue,
+                                  color: AppColors.brandBlue,
                                 ),
                               ],
                             ),
@@ -345,7 +367,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                               hasPrimary
                                   ? 'A Primary responder is currently assigned. You will join on STANDBY and step up automatically if needed.'
                                   : 'No helper assigned yet. Accept to become the PRIMARY responder.',
-                              style: const TextStyle(fontSize: 13, color: AppTheme.onSurface),
+                              style: AppTypography.bodySecondary.copyWith(fontSize: 13, height: 1.4),
                             ),
                           ],
                         ),
@@ -356,82 +378,45 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
               ),
             ),
 
-            // Fixed Bottom Sheet Container
+            // SECTION: RESPONDER ACTION (Fixed Bottom Bar Container)
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
               decoration: const BoxDecoration(
-                color: AppTheme.surfaceLowest,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                color: AppColors.surfacePureWhite,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                 boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 16,
-                    offset: Offset(0, -4),
-                  ),
+                  BoxShadow(color: Color(0x0F000000), blurRadius: 10, offset: Offset(0, -3)),
                 ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (isCancelled || isCompleted) ...[
-                    Row(
-                      children: [
-                        Icon(
-                          isCancelled ? Icons.cancel_outlined : Icons.check_circle_outline,
-                          color: isCancelled ? const Color(0xFF64748B) : Colors.green,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          isCancelled ? 'Emergency Was Cancelled' : 'Emergency Resolved',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.onSurface,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      isCancelled
-                          ? 'This alert was cancelled by the victim or false alarm guard. No response needed.'
-                          : 'This emergency incident has been successfully resolved and closed.',
-                      style: const TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryBlue),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.brandBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          minimumSize: const Size(0, 48),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                         onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('BACK TO HISTORY'),
+                        child: const Text('BACK TO HISTORY', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ] else if (_emergencyService.isEmergencyDeclined(widget.emergencyId)) ...[
-                    const Row(
-                      children: [
-                        Icon(Icons.do_not_disturb_on_outlined, color: AppTheme.tertiaryAmber),
-                        SizedBox(width: 10),
-                        Text(
-                          'You Declined This Alert',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.onSurface,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'You previously declined to respond to this emergency. If you can now assist, tap below.',
-                      style: TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 16),
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 48),
+                              side: const BorderSide(color: AppColors.borderSubtle),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
                             onPressed: () => Navigator.of(context).pop(),
                             child: const Text('BACK'),
                           ),
@@ -439,9 +424,15 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.brandBlue,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(0, 48),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
                             icon: const Icon(Icons.directions_run, size: 20),
-                            label: const Text('CHANGE MIND & HELP'),
+                            label: const Text('CHANGE MIND & HELP', style: TextStyle(fontWeight: FontWeight.bold)),
                             onPressed: () {
                               _emergencyService.unmarkEmergencyDeclined(widget.emergencyId);
                               _showConfirmationDialog();
@@ -451,32 +442,18 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                       ],
                     ),
                   ] else ...[
-                    const Row(
-                      children: [
-                        Icon(Icons.info_outline, color: AppTheme.primaryRed),
-                        SizedBox(width: 10),
-                        Text(
-                          'Become a Helper?',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.onSurface,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Your live location will be shared with the victim and dispatch network while active.',
-                      style: TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 16),
                     _isClaiming
-                        ? const AppLoadingWidget(message: 'Accepting emergency...')
+                        ? const AppLoadingWidget(message: 'Joining rescue...')
                         : Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.textSecondary,
+                                    side: const BorderSide(color: AppColors.borderSubtle),
+                                    minimumSize: const Size(0, 48),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
                                   onPressed: () {
                                     _emergencyService.markEmergencyDeclined(widget.emergencyId);
                                     if (mounted) Navigator.of(context).pop();
@@ -487,9 +464,15 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                                  icon: const Icon(Icons.directions_run, size: 20),
-                                  label: const Text('I CAN HELP'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.emergencyRed,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size(0, 48),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  icon: const Icon(Icons.volunteer_activism, size: 20),
+                                  label: const Text('I CAN HELP', style: TextStyle(fontWeight: FontWeight.bold)),
                                   onPressed: _showConfirmationDialog,
                                 ),
                               ),
@@ -507,6 +490,10 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.initialEmergency != null) {
+      return _buildDetailsContent(widget.initialEmergency!);
+    }
+
     bool isOffline = widget.emergencyId.startsWith('JS-OFF-');
 
     if (isOffline) {
@@ -518,10 +505,10 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
           }
           if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
             return Scaffold(
-              appBar: AppBar(title: const Text('📡 OFFLINE EMERGENCY')),
+              appBar: AppBar(title: const Text('Offline Emergency')),
               body: AppErrorWidget(
-                title: 'Offline Emergency Not Found',
-                message: 'Offline emergency record not found in local storage.',
+                title: 'Emergency Not Found',
+                message: 'This emergency is no longer available offline.',
                 icon: Icons.error_outline,
                 iconColor: Colors.orange,
                 onRetry: () => Navigator.of(context).pop(),
@@ -541,10 +528,10 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
         }
         if (snapshot.hasError || !snapshot.hasData) {
           return Scaffold(
-            appBar: AppBar(title: const Text('🚨 EMERGENCY ALERT')),
+            appBar: AppBar(title: const Text('Emergency Details')),
             body: AppErrorWidget(
               title: 'Emergency Unavailable',
-              message: 'Emergency details unavailable: ${snapshot.error ?? 'Not Found'}',
+              message: 'This emergency could not be loaded. It may have concluded or network signal was lost.',
               onRetry: () => Navigator.of(context).pop(),
             ),
           );

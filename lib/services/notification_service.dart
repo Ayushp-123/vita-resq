@@ -5,7 +5,55 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/constants/app_constants.dart';
+import '../models/emergency_model.dart';
 import '../screens/emergency/emergency_details_screen.dart';
+
+/// Centralized presentation copy for emergency push and in-app alert feedback (Phase 8).
+class EmergencyAlertPresentation {
+  static String formatTitle({required String role, required EmergencyStatus status}) {
+    final isVictim = role.toUpperCase() == 'VICTIM';
+    switch (status) {
+      case EmergencyStatus.SEARCHING:
+        return isVictim ? 'Help request active' : 'New emergency nearby';
+      case EmergencyStatus.ASSIGNED:
+        return isVictim ? 'Responder on the way' : "You're responding";
+      case EmergencyStatus.APPROACHING:
+        return isVictim ? 'Responder approaching' : 'Approaching location';
+      case EmergencyStatus.ARRIVED:
+        return isVictim ? 'Responder has arrived' : "You've arrived";
+      case EmergencyStatus.COMPLETED:
+        return 'Emergency completed';
+      case EmergencyStatus.CANCELLED:
+        return 'Emergency cancelled';
+    }
+  }
+
+  static String formatBody({required String role, required EmergencyStatus status, String? type}) {
+    final isVictim = role.toUpperCase() == 'VICTIM';
+    switch (status) {
+      case EmergencyStatus.SEARCHING:
+        return isVictim
+            ? 'Alerting nearby responders and emergency services.'
+            : 'Someone nearby needs emergency assistance.';
+      case EmergencyStatus.ASSIGNED:
+        return isVictim
+            ? 'A nearby responder has accepted and is preparing.'
+            : 'Navigation and emergency details ready.';
+      case EmergencyStatus.APPROACHING:
+        return isVictim
+            ? 'Your responder is en-route and closing in.'
+            : 'Navigating to victim coordinates.';
+      case EmergencyStatus.ARRIVED:
+        return isVictim
+            ? 'Help is now at your location.'
+            : 'You have reached the emergency scene.';
+      case EmergencyStatus.COMPLETED:
+        return 'The emergency has been resolved safely.';
+      case EmergencyStatus.CANCELLED:
+        return 'The emergency request was cancelled.';
+    }
+  }
+}
 
 class NotificationService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();

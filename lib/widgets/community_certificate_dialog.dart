@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/impact_model.dart';
 import '../core/theme/app_theme.dart';
+import 'common/app_feedback.dart';
 
 /// Modal dialog displaying official Vita ResQ Community Responder Certificate
 class CommunityCertificateDialog extends StatelessWidget {
@@ -66,29 +67,30 @@ class CommunityCertificateDialog extends StatelessWidget {
                         ),
                         child: const Icon(Icons.shield_rounded, color: AppTheme.primaryRed, size: 28),
                       ),
-                      const SizedBox(width: 10),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'VITA RESQ NETWORK',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 2,
-                              color: Color(0xFF1E293B),
+                      const Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'VITA RESQ NETWORK',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 2,
+                                color: Color(0xFF1E293B),
+                              ),
                             ),
-                          ),
-                          Text(
-                            'COMMUNITY EMERGENCY RESPONSE NETWORK',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.2,
-                              color: Color(0xFF64748B),
+                            Text(
+                              'COMMUNITY EMERGENCY RESPONSE NETWORK',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                                color: Color(0xFF64748B),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -170,25 +172,31 @@ class CommunityCertificateDialog extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildMetricTile(
-                          icon: Icons.star_rounded,
-                          color: const Color(0xFFF59E0B),
-                          label: 'IMPACT SCORE',
-                          value: '${impactProfile.impactPoints}',
+                        Expanded(
+                          child: _buildMetricTile(
+                            icon: Icons.star_rounded,
+                            color: const Color(0xFFF59E0B),
+                            label: 'IMPACT SCORE',
+                            value: '${impactProfile.impactPoints}',
+                          ),
                         ),
                         Container(width: 1, height: 32, color: const Color(0xFFCBD5E1)),
-                        _buildMetricTile(
-                          icon: Icons.volunteer_activism_rounded,
-                          color: const Color(0xFF10B981),
-                          label: 'VERIFIED ASSISTS',
-                          value: '${impactProfile.verifiedAssists}',
+                        Expanded(
+                          child: _buildMetricTile(
+                            icon: Icons.volunteer_activism_rounded,
+                            color: const Color(0xFF10B981),
+                            label: 'VERIFIED ASSISTS',
+                            value: '${impactProfile.verifiedAssists}',
+                          ),
                         ),
                         Container(width: 1, height: 32, color: const Color(0xFFCBD5E1)),
-                        _buildMetricTile(
-                          icon: Icons.workspace_premium_rounded,
-                          color: level.color,
-                          label: 'RANK TIER',
-                          value: level.badgeName,
+                        Expanded(
+                          child: _buildMetricTile(
+                            icon: Icons.workspace_premium_rounded,
+                            color: level.color,
+                            label: 'RANK TIER',
+                            value: level.badgeName,
+                          ),
                         ),
                       ],
                     ),
@@ -247,11 +255,9 @@ class CommunityCertificateDialog extends StatelessWidget {
                     label: const Text('SHARE CERTIFICATE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     onPressed: () {
                       Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          backgroundColor: Color(0xFF10B981),
-                          content: Text('Certificate copied & ready to share!'),
-                        ),
+                      AppSnackbar.showSuccess(
+                        context,
+                        'Certificate copied & ready to share!',
                       );
                     },
                   ),

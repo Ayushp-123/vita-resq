@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
-import '../core/theme/app_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_shapes.dart';
+import '../core/theme/app_typography.dart';
 import '../services/app_permissions_service.dart';
 
+/// Essential permissions request sheet (Phase 8 Redesign).
+///
+/// Follows concise, human feedback principles:
+/// - Replaces technical Android/OS jargon with plain reasons why access is needed.
+/// - Minimum 48dp touch targets.
+/// - Responsive and scrollable on compact devices.
 class PermissionRequestDialog extends StatefulWidget {
   final VoidCallback onPermissionsGranted;
 
@@ -54,143 +62,167 @@ class _PermissionRequestDialogState extends State<PermissionRequestDialog> {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: AppTheme.surfaceLowest,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        color: AppColors.surfacePureWhite,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: Color(0x33000000),
             blurRadius: 24,
             offset: Offset(0, -6),
           ),
         ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 28.0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Top row with Drag handle and Close button
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(width: 32),
-              Container(
-                width: 48,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceHighest,
-                  borderRadius: BorderRadius.circular(10),
+              // Top drag handle & close
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox(width: 40),
+                  Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.borderMedium,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 22),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                    onPressed: () => widget.onPermissionsGranted(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Header Badge
+              Center(
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppColors.emergencyLightRed,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.emergencyRed.withValues(alpha: 0.3),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.security_rounded,
+                    size: 34,
+                    color: AppColors.emergencyRed,
+                  ),
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.close, color: AppTheme.onSurfaceVariant, size: 22),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              const SizedBox(height: 16),
+
+              Text(
+                'Emergency Permissions Required',
+                textAlign: TextAlign.center,
+                style: AppTypography.pageHeading.copyWith(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.deepNavy,
+                ),
+              ),
+              const SizedBox(height: 6),
+
+              Text(
+                'Vita ResQ is a mutual-aid emergency network. These permissions enable volunteers and services to reach you when you need help:',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySecondary.copyWith(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Permission 1: GPS Location
+              _buildPermissionItem(
+                icon: Icons.location_on_rounded,
+                iconColor: AppColors.emergencyRed,
+                title: 'Location Access',
+                description: 'Location is needed to share your emergency position with nearby responders.',
+              ),
+              const SizedBox(height: 10),
+
+              // Permission 2: Notifications
+              _buildPermissionItem(
+                icon: Icons.notifications_active_rounded,
+                iconColor: AppColors.brandBlue,
+                title: 'Emergency Alerts',
+                description: 'Alerts are needed to sound emergency warnings and dispatch updates.',
+              ),
+              const SizedBox(height: 10),
+
+              // Permission 3: Bluetooth & Nearby
+              _buildPermissionItem(
+                icon: Icons.wifi_tethering_rounded,
+                iconColor: AppColors.emeraldGreen,
+                title: 'Nearby Connectivity',
+                description: 'Needed for offline mutual-aid when mobile networks are unavailable.',
+              ),
+              const SizedBox(height: 22),
+
+              // Action Buttons
+              _isRequesting
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(12.0),
+                        child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.brandBlue),
+                      ),
+                    )
+                  : ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.emergencyRed,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 52),
+                        elevation: 0,
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: AppShapes.medium,
+                        ),
+                      ),
+                      icon: const Icon(Icons.verified_user_rounded, size: 20),
+                      label: const Text(
+                        'GRANT ALL PERMISSIONS',
+                        style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, letterSpacing: 0.3),
+                      ),
+                      onPressed: _handleGrantPermissions,
+                    ),
+              const SizedBox(height: 8),
+
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+                icon: const Icon(Icons.settings_outlined, size: 18),
+                label: const Text('Open App Settings Manually', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                onPressed: () => _permService.openSettings(),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 48),
+                ),
                 onPressed: () => widget.onPermissionsGranted(),
+                child: const Text(
+                  'Continue to App',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brandBlue, fontSize: 13),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          // Header Badge
-          Center(
-            child: Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryRed.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.3), width: 2),
-              ),
-              child: const Icon(
-                Icons.security_outlined,
-                size: 40,
-                color: AppTheme.primaryRed,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          const Text(
-            'Emergency Permissions Required',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.onSurface,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-
-          const Text(
-            'Vita ResQ is a community emergency response network. To find victims and dispatch nearby responders, please enable these essential permissions:',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant, height: 1.4),
-          ),
-          const SizedBox(height: 20),
-
-          // Permission Item 1: GPS Location
-          _buildPermissionItem(
-            icon: Icons.location_on_outlined,
-            iconColor: AppTheme.primaryRed,
-            title: 'Precise GPS Location',
-            description: 'Streams your real-time satellite coordinates to nearby 108 ambulances, PCR units, and volunteers during an SOS.',
-          ),
-          const SizedBox(height: 12),
-
-          // Permission Item 2: Notifications
-          _buildPermissionItem(
-            icon: Icons.notifications_active_outlined,
-            iconColor: AppTheme.secondaryBlue,
-            title: 'Critical Emergency Notifications',
-            description: 'Triggers loud sirens, vibration alerts, and live dispatch updates even when your screen is locked.',
-          ),
-          const SizedBox(height: 12),
-
-          // Permission Item 3: Bluetooth & Nearby Devices
-          _buildPermissionItem(
-            icon: Icons.wifi_tethering_rounded,
-            iconColor: Colors.teal,
-            title: 'Nearby Devices & Bluetooth',
-            description: 'Enables offline nearby-device P2P communication when mobile data or towers are down during natural disasters.',
-          ),
-          const SizedBox(height: 24),
-
-          // Action Buttons
-          _isRequesting
-              ? const Center(child: CircularProgressIndicator())
-              : ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryRed,
-                    minimumSize: const Size(double.infinity, 54),
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  icon: const Icon(Icons.verified_user_outlined, size: 22),
-                  label: const Text(
-                    'GRANT ALL PERMISSIONS',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                  ),
-                  onPressed: _handleGrantPermissions,
-                ),
-          const SizedBox(height: 10),
-
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.onSurfaceVariant,
-            ),
-            icon: const Icon(Icons.settings_outlined, size: 18),
-            label: const Text('Open App Settings Manually', style: TextStyle(fontSize: 13)),
-            onPressed: () => _permService.openSettings(),
-          ),
-          TextButton(
-            onPressed: () => widget.onPermissionsGranted(),
-            child: const Text('Continue to App', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.secondaryBlue)),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -204,9 +236,9 @@ class _PermissionRequestDialogState extends State<PermissionRequestDialog> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceLow,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.surfaceHighest),
+        color: AppColors.subtleBlueGray,
+        borderRadius: AppShapes.medium,
+        border: Border.all(color: AppColors.borderSubtle),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -226,12 +258,20 @@ class _PermissionRequestDialogState extends State<PermissionRequestDialog> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.onSurface),
+                  style: AppTypography.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: AppColors.deepNavy,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   description,
-                  style: const TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant, height: 1.3),
+                  style: AppTypography.bodySecondary.copyWith(
+                    fontSize: 11.5,
+                    color: AppColors.textSecondary,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),

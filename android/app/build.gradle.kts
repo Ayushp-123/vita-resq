@@ -9,7 +9,7 @@ android {
     namespace = "com.example.jan_sarthi"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
-    ndkVersion = "28.2.13676358"
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/responder_model.dart';
-import '../core/theme/app_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_typography.dart';
+import '../core/theme/app_shapes.dart';
+import 'common/app_feedback.dart';
 
 class ResponderProfileCard extends StatelessWidget {
   final ResponderModel responder;
@@ -16,11 +19,9 @@ class ResponderProfileCard extends StatelessWidget {
   void _handlePhoneCall(BuildContext context) {
     String? phone = responder.phoneNumber;
     if (phone == null || phone.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Phone number not provided for ${responder.userName}.'),
-          backgroundColor: AppTheme.tertiaryAmber,
-        ),
+      AppSnackbar.showWarning(
+        context,
+        'Phone number not available for this responder.',
       );
       return;
     }
@@ -46,23 +47,30 @@ class ResponderProfileCard extends StatelessWidget {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
           title: Row(
             children: [
-              const Icon(Icons.phone, color: AppTheme.secondaryBlue),
+              const Icon(Icons.phone_rounded, color: AppColors.brandBlue),
               const SizedBox(width: 8),
-              Text(responder.userName),
+              Text(
+                responder.userName.isNotEmpty ? responder.userName : 'Responder Contact',
+                style: AppTypography.subheading,
+              ),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Helper Contact Phone Number:'),
+              const Text('Responder Phone Number:', style: AppTypography.bodySecondary),
               const SizedBox(height: 8),
               SelectableText(
                 phone,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.secondaryBlue),
+                style: AppTypography.bodyMedium.copyWith(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.brandBlue,
+                ),
               ),
             ],
           ),
@@ -83,139 +91,130 @@ class ResponderProfileCard extends StatelessWidget {
     bool isAmbulance = responder.userRole == 'AMBULANCE_DRIVER';
     bool isPolice = responder.userRole == 'POLICE_PCR';
 
-    Color badgeColor = isAmbulance
-        ? AppTheme.primaryRed
+    Color roleColor = isAmbulance
+        ? AppColors.emergencyRed
         : isPolice
-            ? AppTheme.secondaryBlue
-            : (isPrimary ? AppTheme.primaryRed : AppTheme.tertiaryAmber);
+            ? AppColors.brandBlue
+            : (isPrimary ? AppColors.emeraldGreen : AppColors.warningAmber);
 
     String roleLabel = isAmbulance
-        ? '🚑 108 AMBULANCE (${responder.vehicleNumber ?? '108'})'
+        ? 'Ambulance #${responder.vehicleNumber ?? '108'}'
         : isPolice
-            ? '🚓 POLICE PCR (${responder.vehicleNumber ?? 'PCR-12'})'
-            : (isPrimary ? 'PRIMARY HELPER' : 'STANDBY HELPER');
+            ? 'Police Unit #${responder.vehicleNumber ?? 'PCR'}'
+            : (isPrimary ? 'Primary Responder' : 'Standby Responder');
 
     IconData avatarIcon = isAmbulance
-        ? Icons.local_hospital
+        ? Icons.local_hospital_rounded
         : isPolice
-            ? Icons.local_police
-            : Icons.person;
+            ? Icons.local_police_rounded
+            : Icons.person_rounded;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceLow,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isAmbulance || isPolice ? badgeColor.withValues(alpha: 0.5) : AppTheme.surfaceHighest),
+        color: AppColors.surfacePureWhite,
+        borderRadius: AppShapes.card,
+        border: Border.all(color: AppColors.borderSubtle, width: 1),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          // Avatar with Status Badge
+          // Avatar with Status Indicator
           Stack(
-            alignment: Alignment.bottomRight,
+            clipBehavior: Clip.none,
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isAmbulance || isPolice ? badgeColor.withValues(alpha: 0.1) : AppTheme.surfaceContainer,
-                  border: Border.all(color: badgeColor, width: 2),
+                  color: roleColor.withValues(alpha: 0.12),
+                  border: Border.all(color: roleColor.withValues(alpha: 0.3), width: 1.5),
                 ),
                 child: Icon(
                   avatarIcon,
-                  size: 30,
-                  color: badgeColor,
+                  size: 26,
+                  color: roleColor,
                 ),
               ),
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: responder.status == ResponderStatus.ARRIVED
-                      ? Colors.green
-                      : isPrimary
-                          ? AppTheme.primaryRed
-                          : AppTheme.tertiaryAmber,
-                  border: Border.all(color: Colors.white, width: 2),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: responder.status == ResponderStatus.ARRIVED
+                        ? AppColors.emeraldGreen
+                        : AppColors.brandBlue,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
 
-          // Helper Information
+          // Responder Details
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
+                Text(
+                  responder.userName.isNotEmpty ? responder.userName : 'Vita ResQ Responder',
+                  style: AppTypography.bodyMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: AppColors.deepNavy,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
                 Row(
                   children: [
-                    Flexible(
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: roleColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       child: Text(
-                        responder.userName.isNotEmpty ? responder.userName : 'Vita ResQ Responder',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.onSurface,
+                        roleLabel,
+                        style: AppTypography.caption.copyWith(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: roleColor,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: badgeColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    roleLabel,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: badgeColor,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
                     if (responder.bloodGroup != null && responder.bloodGroup!.isNotEmpty) ...[
+                      const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryRed.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
+                          color: AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: AppColors.borderSubtle, width: 0.8),
                         ),
                         child: Text(
-                          'Blood: ${responder.bloodGroup}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primaryRed,
+                          responder.bloodGroup!,
+                          style: AppTypography.caption.copyWith(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.emergencyRed,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
                     ],
-                    Expanded(
-                      child: Text(
-                        responder.phoneNumber != null && responder.phoneNumber!.isNotEmpty
-                            ? responder.phoneNumber!
-                            : 'No phone listed',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
                   ],
                 ),
               ],
@@ -223,14 +222,23 @@ class ResponderProfileCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
 
-          // Call Action Button
-          IconButton.filled(
-            style: IconButton.styleFrom(
-              backgroundColor: AppTheme.secondaryBlue,
-              foregroundColor: Colors.white,
+          // Call Action Button (>= 48dp touch target)
+          Material(
+            color: AppColors.brandBlue,
+            shape: const CircleBorder(),
+            child: InkWell(
+              onTap: () => _handlePhoneCall(context),
+              customBorder: const CircleBorder(),
+              child: const SizedBox(
+                width: 48,
+                height: 48,
+                child: Icon(
+                  Icons.phone_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
             ),
-            icon: const Icon(Icons.phone, size: 20),
-            onPressed: () => _handlePhoneCall(context),
           ),
         ],
       ),

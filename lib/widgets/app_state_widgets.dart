@@ -1,107 +1,72 @@
 import 'package:flutter/material.dart';
+import 'common/app_feedback.dart';
 
-/// Reusable loading indicator with optional label
-class AppLoadingWidget extends StatelessWidget {
+export 'common/app_feedback.dart';
+
+// Backward-compatible widget implementations mapped directly to Phase 8 components.
+
+/// Legacy AppLoadingWidget forwarding to [AppLoadingState].
+class LegacyAppLoadingWidget extends StatelessWidget {
   final String? message;
-  const AppLoadingWidget({super.key, this.message});
+  const LegacyAppLoadingWidget({super.key, this.message});
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          if (message != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              message!,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-            ),
-          ],
-        ],
-      ),
-    );
+    return AppLoadingState(message: message ?? 'Loading…');
   }
 }
 
-/// Reusable error view widget with action button
-class AppErrorWidget extends StatelessWidget {
+/// Legacy AppErrorWidget forwarding to [AppErrorState].
+class LegacyAppErrorWidget extends StatelessWidget {
   final String title;
   final String message;
   final String buttonText;
   final VoidCallback? onRetry;
   final IconData icon;
-  final Color iconColor;
+  final Color? iconColor;
 
-  const AppErrorWidget({
+  const LegacyAppErrorWidget({
     super.key,
     this.title = 'An Error Occurred',
     required this.message,
     this.buttonText = 'GO BACK',
     this.onRetry,
     this.icon = Icons.error_outline,
-    this.iconColor = Colors.red,
+    this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: iconColor, size: 56),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-            ),
-            const SizedBox(height: 20),
-            if (onRetry != null)
-              ElevatedButton(
-                onPressed: onRetry,
-                child: Text(buttonText),
-              ),
-          ],
-        ),
-      ),
+    return AppErrorState(
+      title: title,
+      message: message,
+      buttonText: buttonText,
+      onRetry: onRetry,
+      icon: icon,
+      iconColor: iconColor,
     );
   }
 }
 
-/// Reusable empty state display widget
-class AppEmptyWidget extends StatelessWidget {
+/// Legacy AppEmptyWidget forwarding to [AppEmptyState].
+class LegacyAppEmptyWidget extends StatelessWidget {
   final String message;
   final IconData icon;
+  final String title;
 
-  const AppEmptyWidget({
+  const LegacyAppEmptyWidget({
     super.key,
     required this.message,
     this.icon = Icons.inbox_outlined,
+    this.title = 'No items yet',
   });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 48, color: Colors.grey),
-          const SizedBox(height: 12),
-          Text(
-            message,
-            style: const TextStyle(color: Colors.grey, fontSize: 16),
-          ),
-        ],
-      ),
+    return AppEmptyState(
+      title: title,
+      message: message,
+      icon: icon,
     );
   }
 }

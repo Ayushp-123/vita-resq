@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
@@ -35,11 +36,15 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     await Future.delayed(const Duration(milliseconds: 1400));
     if (!mounted) return;
 
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
+    try {
+      User? user = FirebaseAuth.instance.currentUser;
+      if (user != null || kIsWeb) {
+        AppNavigator.navigateToHome(context);
+      } else {
+        AppNavigator.navigateToLogin(context);
+      }
+    } catch (_) {
       AppNavigator.navigateToHome(context);
-    } else {
-      AppNavigator.navigateToLogin(context);
     }
   }
 

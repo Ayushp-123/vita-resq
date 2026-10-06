@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../services/impact_reward_service.dart';
-import '../core/theme/app_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_typography.dart';
+import '../core/theme/app_shapes.dart';
+import '../core/theme/app_spacing.dart';
+import 'common/app_feedback.dart';
 
 /// Feedback dialog for victims to verify and rate helper assistance
 class VictimFeedbackDialog extends StatelessWidget {
@@ -39,15 +43,33 @@ class VictimFeedbackDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: const Row(
+      shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+      backgroundColor: AppColors.surfacePureWhite,
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+      title: Row(
         children: [
-          Icon(Icons.volunteer_activism_rounded, color: AppTheme.primaryRed, size: 28),
-          SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.emeraldGreen.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.volunteer_activism_rounded,
+              color: AppColors.emeraldGreen,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               'Verify Assistance',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              style: AppTypography.sectionHeading.copyWith(
+                fontSize: 18,
+                color: AppColors.deepNavy,
+              ),
             ),
           ),
         ],
@@ -56,26 +78,34 @@ class VictimFeedbackDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Did this responder reach and assist you during this emergency?',
-            style: TextStyle(fontSize: 14, color: AppTheme.onSurfaceVariant, height: 1.4),
+            style: AppTypography.bodySecondary.copyWith(
+              fontSize: 13,
+              height: 1.4,
+              color: AppColors.textSecondary,
+            ),
           ),
-          const SizedBox(height: 16),
+          AppSpacing.gapVerticalMd,
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.borderSubtle),
             ),
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: AppTheme.secondaryBlue,
+                  backgroundColor: AppColors.brandBlue,
                   radius: 20,
                   child: Text(
                     helperName.isNotEmpty ? helperName[0].toUpperCase() : 'H',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -85,11 +115,20 @@ class VictimFeedbackDialog extends StatelessWidget {
                     children: [
                       Text(
                         helperName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        style: AppTypography.bodyMedium.copyWith(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: AppColors.deepNavy,
+                        ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         helperRole,
-                        style: const TextStyle(fontSize: 12, color: AppTheme.secondaryBlue, fontWeight: FontWeight.w600),
+                        style: AppTypography.caption.copyWith(
+                          fontSize: 12,
+                          color: AppColors.brandBlue,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -99,15 +138,17 @@ class VictimFeedbackDialog extends StatelessWidget {
           ),
         ],
       ),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       actions: [
         Row(
           children: [
             Expanded(
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.grey.shade700,
+                  foregroundColor: AppColors.textSecondary,
+                  side: const BorderSide(color: AppColors.borderSubtle),
                   padding: const EdgeInsets.symmetric(vertical: 12),
+                  minimumSize: const Size(0, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: () {
                   Navigator.of(context).pop();
@@ -120,9 +161,12 @@ class VictimFeedbackDialog extends StatelessWidget {
               flex: 2,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981), // Emerald Green
+                  backgroundColor: AppColors.emeraldGreen,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
+                  minimumSize: const Size(0, 48),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 icon: const Icon(Icons.thumb_up_rounded, size: 18),
                 label: const Text('YES, HELPED ME', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -134,11 +178,9 @@ class VictimFeedbackDialog extends StatelessWidget {
                   );
                   if (context.mounted) {
                     Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        backgroundColor: Color(0xFF10B981),
-                        content: Text('Thank you! Community Impact Points awarded to responder.'),
-                      ),
+                    AppSnackbar.showSuccess(
+                      context,
+                      'Thank you! Recognition recorded for your responder.',
                     );
                   }
                 },

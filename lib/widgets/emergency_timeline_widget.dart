@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/emergency_model.dart';
-import '../core/theme/app_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_typography.dart';
+import '../core/theme/app_shapes.dart';
 
 class EmergencyTimelineWidget extends StatelessWidget {
   final EmergencyStatus status;
@@ -29,27 +31,27 @@ class EmergencyTimelineWidget extends StatelessWidget {
     required bool isCompleted,
     required bool isActive,
   }) {
-    Color iconBgColor = isCompleted
-        ? AppTheme.secondaryBlue
+    Color nodeBgColor = isCompleted
+        ? AppColors.emeraldGreen
         : isActive
-            ? AppTheme.surfaceLight
-            : AppTheme.surfaceLow;
+            ? AppColors.surfacePureWhite
+            : AppColors.surfaceLight;
 
     Border? border = isActive
-        ? Border.all(color: AppTheme.secondaryBlue, width: 2)
-        : !isCompleted
-            ? Border.all(color: AppTheme.surfaceHighest, width: 2)
-            : null;
+        ? Border.all(color: AppColors.brandBlue, width: 2.5)
+        : isCompleted
+            ? null
+            : Border.all(color: AppColors.borderSubtle, width: 1.5);
 
     Widget iconChild;
     if (isCompleted) {
-      iconChild = const Icon(Icons.check, color: Colors.white, size: 14);
+      iconChild = const Icon(Icons.check_rounded, color: Colors.white, size: 14);
     } else if (isActive) {
       iconChild = Container(
         width: 10,
         height: 10,
         decoration: const BoxDecoration(
-          color: AppTheme.secondaryBlue,
+          color: AppColors.brandBlue,
           shape: BoxShape.circle,
         ),
       );
@@ -61,16 +63,16 @@ class EmergencyTimelineWidget extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: isActive ? 32 : 24,
-          height: isActive ? 32 : 24,
+          width: isActive ? 28 : 22,
+          height: isActive ? 28 : 22,
           decoration: BoxDecoration(
-            color: iconBgColor,
+            color: nodeBgColor,
             shape: BoxShape.circle,
             border: border,
             boxShadow: isActive
                 ? [
                     BoxShadow(
-                      color: AppTheme.secondaryBlue.withValues(alpha: 0.25),
+                      color: AppColors.brandBlue.withValues(alpha: 0.25),
                       blurRadius: 8,
                       spreadRadius: 2,
                     ),
@@ -80,16 +82,19 @@ class EmergencyTimelineWidget extends StatelessWidget {
           child: Center(child: iconChild),
         ),
         const SizedBox(height: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: isActive || isCompleted ? FontWeight.bold : FontWeight.normal,
-            color: isActive
-                ? AppTheme.secondaryBlue
-                : isCompleted
-                    ? AppTheme.onSurface
-                    : AppTheme.outlineColor,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            style: AppTypography.caption.copyWith(
+              fontSize: 10.5,
+              fontWeight: isActive || isCompleted ? FontWeight.w700 : FontWeight.w500,
+              color: isActive
+                  ? AppColors.brandBlue
+                  : isCompleted
+                      ? AppColors.deepNavy
+                      : AppColors.textMuted,
+            ),
           ),
         ),
       ],
@@ -101,41 +106,41 @@ class EmergencyTimelineWidget extends StatelessWidget {
     int activeIdx = _currentStepIndex;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceLow,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.surfaceHighest),
+        color: AppColors.surfacePureWhite,
+        borderRadius: AppShapes.card,
+        border: Border.all(color: AppColors.borderSubtle, width: 1),
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Connecting Progress Bar
+          // Connecting Progress Line
           Positioned(
             left: 24,
             right: 24,
-            top: 14,
+            top: 12,
             child: Row(
               children: [
                 Expanded(
                   flex: 1,
                   child: Container(
-                    height: 2,
-                    color: activeIdx >= 1 ? AppTheme.secondaryBlue : AppTheme.surfaceHighest,
+                    height: 2.5,
+                    color: activeIdx >= 1 ? AppColors.brandBlue : AppColors.borderSubtle,
                   ),
                 ),
                 Expanded(
                   flex: 1,
                   child: Container(
-                    height: 2,
-                    color: activeIdx >= 2 ? AppTheme.secondaryBlue : AppTheme.surfaceHighest,
+                    height: 2.5,
+                    color: activeIdx >= 2 ? AppColors.brandBlue : AppColors.borderSubtle,
                   ),
                 ),
                 Expanded(
                   flex: 1,
                   child: Container(
-                    height: 2,
-                    color: activeIdx >= 3 ? AppTheme.secondaryBlue : AppTheme.surfaceHighest,
+                    height: 2.5,
+                    color: activeIdx >= 3 ? AppColors.brandBlue : AppColors.borderSubtle,
                   ),
                 ),
               ],
@@ -143,31 +148,38 @@ class EmergencyTimelineWidget extends StatelessWidget {
           ),
           // Step Nodes
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildStepItem(
-                stepIndex: 0,
-                label: 'Search',
-                isCompleted: activeIdx > 0,
-                isActive: activeIdx == 0,
+              Expanded(
+                child: _buildStepItem(
+                  stepIndex: 0,
+                  label: 'Search',
+                  isCompleted: activeIdx > 0,
+                  isActive: activeIdx == 0,
+                ),
               ),
-              _buildStepItem(
-                stepIndex: 1,
-                label: 'Assigned',
-                isCompleted: activeIdx > 1,
-                isActive: activeIdx == 1,
+              Expanded(
+                child: _buildStepItem(
+                  stepIndex: 1,
+                  label: 'Assigned',
+                  isCompleted: activeIdx > 1,
+                  isActive: activeIdx == 1,
+                ),
               ),
-              _buildStepItem(
-                stepIndex: 2,
-                label: 'Approaching',
-                isCompleted: activeIdx > 2,
-                isActive: activeIdx == 2,
+              Expanded(
+                child: _buildStepItem(
+                  stepIndex: 2,
+                  label: 'Approaching',
+                  isCompleted: activeIdx > 2,
+                  isActive: activeIdx == 2,
+                ),
               ),
-              _buildStepItem(
-                stepIndex: 3,
-                label: 'Arrived',
-                isCompleted: activeIdx > 3,
-                isActive: activeIdx == 3,
+              Expanded(
+                child: _buildStepItem(
+                  stepIndex: 3,
+                  label: 'Arrived',
+                  isCompleted: activeIdx > 3,
+                  isActive: activeIdx == 3,
+                ),
               ),
             ],
           ),

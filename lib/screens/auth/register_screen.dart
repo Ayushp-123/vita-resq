@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import '../../services/app_permissions_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/navigation/app_navigator.dart';
+import '../../widgets/common/app_feedback.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -41,37 +43,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
     String vehicleNumber = _vehicleNumberController.text.trim();
 
     if (name.isEmpty || email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all required fields.')),
-      );
+      AppSnackbar.showWarning(context, 'Please complete all required fields.');
       return;
     }
 
     if (!email.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid email address.')),
-      );
+      AppSnackbar.showWarning(context, 'Please enter a valid email address.');
       return;
     }
 
     if (password.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password must be at least 6 characters long.')),
-      );
+      AppSnackbar.showWarning(context, 'Password must be at least 6 characters.');
       return;
     }
 
     if (password != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Passwords do not match.')),
-      );
+      AppSnackbar.showWarning(context, 'Passwords do not match.');
       return;
     }
 
     if (_selectedRole != 'CITIZEN' && vehicleNumber.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your Vehicle / Unit number.')),
-      );
+      AppSnackbar.showWarning(context, 'Please enter your Vehicle or Patrol Unit number.');
       return;
     }
 
@@ -91,10 +83,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
       AppNavigator.navigateToHome(context);
-    } catch (e) {
+    } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: ${e.toString()}')),
+      String message;
+      switch (e.code) {
+        case 'email-already-in-use':
+          message = 'This email address is already registered. Please sign in instead.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address format.';
+          break;
+        case 'weak-password':
+          message = 'The password is too weak. Please use at least 6 characters.';
+          break;
+        case 'network-request-failed':
+          message = 'Network unavailable. Please check your internet connection.';
+          break;
+        default:
+          message = 'Unable to create account. Please check your details and try again.';
+      }
+      AppSnackbar.showError(context, message);
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbar.showError(
+        context,
+        'Unable to create account. Please check your details and try again.',
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -236,6 +249,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
                           initialValue: _selectedRole,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             prefixIcon: Icon(Icons.badge_outlined, color: AppTheme.outlineColor),
                           ),
@@ -285,6 +299,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
                           initialValue: _selectedBloodGroup,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             prefixIcon: Icon(Icons.bloodtype_outlined, color: AppTheme.primaryRed),
                           ),
@@ -339,18 +354,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 24),
 
-                        // Submit Button
-                        _isLoading
-                            ? const Center(child: CircularProgressIndicator())
-                            : ElevatedButton(
-                                onPressed: _register,
-                                child: const Text('CREATE ACCOUNT'),
-                              ),
+                        // Submit Button (Fixed height prevents layout collapse during loading)
+                        SizedBox(
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _register,
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('CREATE ACCOUNT'),
+                          ),
+                        ),
                         const SizedBox(height: 20),
 
-                        // Login Link
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        // Login Link (Wrap prevents overflow on compact screens)
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             const Text(
                               'Already registered?',
