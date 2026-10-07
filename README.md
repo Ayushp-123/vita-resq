@@ -124,5 +124,5 @@ Tests cover:
 ## 📄 Canonical Documentation
 
 - 👉 **[VITA_RESQ_MASTER_CHANGELOG.md](VITA_RESQ_MASTER_CHANGELOG.md)** — The single canonical source of truth for the complete project history, architecture, feature inventory, security audits, and engineering decision log.
-- 👉 **[VITA_RESQ_FEATURES.md](VITA_RESQ_FEATURES.md)** — Quick-reference feature notepad for demo preparation, PPT presentations, and testing.
+- 👉 **[VITA_RESQ_FEATURES.md](VITA_RESQ_FEATURES.md)** — Quick-reference feature notepad.
 
