@@ -162,7 +162,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           DropdownMenuItem(
                             value: 'AMBULANCE_DRIVER',
-                            child: Text('🚑 108 Ambulance Driver'),
+                            child: Text('🚑 Ambulance Driver'),
                           ),
                           DropdownMenuItem(
                             value: 'POLICE_PCR',
@@ -258,7 +258,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (role == 'AMBULANCE_DRIVER') {
       icon = Icons.local_hospital_outlined;
-      label = '108 Ambulance Driver${vehicle != null && vehicle.isNotEmpty ? ' ($vehicle)' : ''}';
+      label = 'Ambulance Driver${vehicle != null && vehicle.isNotEmpty ? ' ($vehicle)' : ''}';
       iconColor = AppColors.emergencyRed;
     } else if (role == 'POLICE_PCR') {
       icon = Icons.local_police_outlined;

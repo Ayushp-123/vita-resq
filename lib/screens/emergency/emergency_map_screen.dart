@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../models/emergency_model.dart';
 import '../../models/responder_model.dart';
 import '../../models/communication_mode.dart';
+import '../../models/hospital_model.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_shapes.dart';
@@ -17,6 +18,7 @@ import '../../core/theme/app_status.dart';
 import '../../services/emergency_service.dart';
 import '../../services/location_service.dart';
 import '../../services/routing_service.dart';
+import '../../services/hospital_service.dart';
 import '../../services/connectivity_service.dart';
 import '../../services/responder_reliability_monitor.dart';
 import '../../services/local_database_service.dart';
@@ -30,6 +32,9 @@ import '../../widgets/responder_profile_card.dart';
 import '../../widgets/victim_feedback_dialog.dart';
 import '../../widgets/emergency_type_sheet.dart';
 import '../../services/impact_reward_service.dart';
+import '../../services/auth_service.dart';
+import '../../widgets/common/app_feedback.dart';
+import '../../core/navigation/app_navigator.dart';
 
 class EmergencyMapScreen extends StatefulWidget {
   final String emergencyId;
@@ -79,6 +84,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
   Timer? _fallbackSmsTimer;
   bool _smsFallbackTriggered = false;
   int _secondsRemainingForFallback = 180;
+  bool _isCallingVictim = false;
 
   // Route calculation cache
   LatLng? _lastOrigin;
@@ -89,6 +95,20 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
 
   // Dynamic emergency classification override (for immediate feedback)
   String? _overriddenEmergencyType;
+
+  // Hybrid hospital discovery & routing state
+  IHospitalService get _hospitalService => HospitalService.instance;
+  List<HospitalModel> _nearbyHospitals = [];
+  bool _isLoadingHospitals = false;
+  String? _lastDiscoveredEmergencyId;
+  HospitalModel? _selectedHospital;
+  bool _isNavigatingToHospital = false;
+  List<LatLng> _hospitalRoutePolyline = [];
+  double _hospitalDistanceMeters = 0.0;
+  String _hospitalEtaText = '-- min';
+  LatLng? _lastHospitalOrigin;
+  DateTime? _lastHospitalRouteFetchTime;
+  bool _isFetchingHospitalRoute = false;
 
   @override
   void initState() {
@@ -133,30 +153,110 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     }
   }
 
-  void _checkAndStartFallbackTimer(EmergencyModel emergency, bool isVictim) {
-    if (!isVictim || _smsFallbackTriggered) return;
+  void _handleSafeHomeNavigation(EmergencyModel emergency) {
+    try {
+      LocalDatabaseService.broadcastUpdate(emergency);
+      LocalDatabaseService().saveEmergencyLocally(emergency);
+    } catch (_) {}
 
-    if (emergency.status == EmergencyStatus.SEARCHING) {
-      _fallbackSmsTimer ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+    final isVictim = emergency.isVictim(_currentUserId);
+    final message = isVictim
+        ? 'Your emergency is still active. Track your responder from Home.'
+        : 'Emergency response is still active. Return to navigation from Home.';
+    AppSnackbar.showInfo(context, message);
+
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } else {
+      AppNavigator.navigateToHome(context);
+    }
+  }
+
+  void _checkAndStartFallbackTimer(EmergencyModel emergency, bool isVictim) async {
+    if (!isVictim) return;
+
+    if (emergency.isTerminal || emergency.status != EmergencyStatus.SEARCHING) {
+      _fallbackSmsTimer?.cancel();
+      _fallbackSmsTimer = null;
+      return;
+    }
+
+    final alreadyDispatched = await EmergencyContactsService.hasDispatchedSmsFallback(emergency.id);
+    if (alreadyDispatched) {
+      if (mounted && !_smsFallbackTriggered) {
+        setState(() {
+          _smsFallbackTriggered = true;
+          _secondsRemainingForFallback = 0;
+        });
+      }
+      _fallbackSmsTimer?.cancel();
+      _fallbackSmsTimer = null;
+      return;
+    }
+
+    final now = DateTime.now();
+    final elapsedSeconds = now.difference(emergency.createdAt).inSeconds;
+    final remaining = (180 - elapsedSeconds).clamp(0, 180);
+
+    if (mounted && _secondsRemainingForFallback != remaining) {
+      setState(() {
+        _secondsRemainingForFallback = remaining;
+      });
+    }
+
+    if (elapsedSeconds >= 180) {
+      _fallbackSmsTimer?.cancel();
+      _fallbackSmsTimer = null;
+      _dispatchEmergencySMS(emergency, isAuto: true);
+      return;
+    }
+
+    if (_fallbackSmsTimer == null || !_fallbackSmsTimer!.isActive) {
+      _fallbackSmsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (!mounted) {
           timer.cancel();
           return;
         }
-        if (_secondsRemainingForFallback > 0) {
-          setState(() => _secondsRemainingForFallback--);
+
+        if (emergency.isTerminal || emergency.status != EmergencyStatus.SEARCHING) {
+          timer.cancel();
+          _fallbackSmsTimer = null;
+          return;
+        }
+
+        final currentElapsed = DateTime.now().difference(emergency.createdAt).inSeconds;
+        final currentRemaining = (180 - currentElapsed).clamp(0, 180);
+
+        if (currentRemaining > 0) {
+          setState(() {
+            _secondsRemainingForFallback = currentRemaining;
+          });
         } else {
           timer.cancel();
+          _fallbackSmsTimer = null;
+          setState(() {
+            _secondsRemainingForFallback = 0;
+          });
           _dispatchEmergencySMS(emergency, isAuto: true);
         }
       });
-    } else {
-      _fallbackSmsTimer?.cancel();
-      _fallbackSmsTimer = null;
     }
   }
 
   void _dispatchEmergencySMS(EmergencyModel emergency, {bool isAuto = false}) async {
     _fallbackSmsTimer?.cancel();
+    _fallbackSmsTimer = null;
+
+    if (await EmergencyContactsService.hasDispatchedSmsFallback(emergency.id)) {
+      if (mounted) setState(() => _smsFallbackTriggered = true);
+      return;
+    }
+
+    if (emergency.isTerminal || emergency.status != EmergencyStatus.SEARCHING) {
+      return;
+    }
+
+    await EmergencyContactsService.markSmsFallbackDispatched(emergency.id);
     if (mounted) setState(() => _smsFallbackTriggered = true);
 
     bool sent = await _contactsService.sendEmergencySMS(
@@ -170,8 +270,8 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
         AppSnackbar.showSuccess(
           context,
           isAuto
-              ? 'Emergency SMS dispatched to trusted contacts.'
-              : 'Emergency SMS with details & live map dispatched.',
+              ? '3-minute rule: Trusted-contact SMS ready to send.'
+              : 'Opening SMS app with details & live map for contacts.',
         );
       } else {
         AppSnackbar.showWarning(
@@ -180,6 +280,61 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
         );
       }
     }
+  }
+
+  void _showWhatsAppFallbackDialog(EmergencyModel emergency) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: AppColors.emergencyRed),
+            SizedBox(width: 8),
+            Text('WhatsApp Unavailable', style: AppTypography.subheading),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Could not open WhatsApp for this contact. Ensure WhatsApp is installed on this device and the contact has an active WhatsApp account.',
+              style: AppTypography.bodySecondary,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Would you like to open your device SMS composer with emergency details and coordinates instead?',
+              style: AppTypography.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Note: Standard carrier SMS charges may apply depending on your mobile plan.',
+              style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('CANCEL'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.brandBlue,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.sms_rounded, size: 16),
+            label: const Text('OPEN SMS COMPOSER'),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _dispatchEmergencySMS(emergency, isAuto: false);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _handleWhatsAppDispatch(EmergencyModel emergency) async {
@@ -202,10 +357,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
         specificPhoneNumber: contacts.first.phoneNumber,
       );
       if (!sent && mounted) {
-        AppSnackbar.showError(
-          context,
-          'WhatsApp dispatch failed. Ensure WhatsApp is installed on this device.',
-        );
+        _showWhatsAppFallbackDialog(emergency);
       }
       return;
     }
@@ -234,25 +386,56 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 6),
+            Text(
+              'Requires an active WhatsApp account on recipient device. Standard carrier SMS rates apply if using SMS fallback.',
+              style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11.5),
+            ),
             const SizedBox(height: 12),
-            ...contacts.map((c) => ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Color(0xFF25D366),
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('${c.relationship} • +${EmergencyContactsService.normalizePhoneNumber(c.phoneNumber)}'),
-                  trailing: const Icon(Icons.send_rounded, color: Color(0xFF25D366)),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await _contactsService.sendEmergencyWhatsApp(
-                      latitude: emergency.latitude,
-                      longitude: emergency.longitude,
-                      type: _overriddenEmergencyType ?? emergency.type,
-                      specificPhoneNumber: c.phoneNumber,
-                    );
-                  },
-                )),
+            ...contacts.map((c) {
+              final formatted = EmergencyContactsService.formatWhatsAppNumber(c.phoneNumber);
+              final displayPhone = formatted.isNotEmpty ? '+$formatted' : c.phoneNumber;
+              return ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF25D366),
+                  child: Icon(Icons.person, color: Colors.white),
+                ),
+                title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('${c.relationship} • $displayPhone'),
+                trailing: const Icon(Icons.send_rounded, color: Color(0xFF25D366)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  bool sent = await _contactsService.sendEmergencyWhatsApp(
+                    latitude: emergency.latitude,
+                    longitude: emergency.longitude,
+                    type: _overriddenEmergencyType ?? emergency.type,
+                    specificPhoneNumber: c.phoneNumber,
+                  );
+                  if (!sent && mounted) {
+                    _showWhatsAppFallbackDialog(emergency);
+                  }
+                },
+              );
+            }),
+            const SizedBox(height: 8),
+            const Divider(color: AppColors.borderSubtle),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.brandBlue.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.sms_rounded, color: AppColors.brandBlue, size: 20),
+              ),
+              title: const Text('Open SMS Composer Instead', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              subtitle: const Text('Direct device SMS intent to all emergency contacts', style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textMuted),
+              onTap: () {
+                Navigator.pop(ctx);
+                _dispatchEmergencySMS(emergency, isAuto: false);
+              },
+            ),
           ],
         ),
       ),
@@ -369,6 +552,151 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
           int mins = (directDist / 80).round();
           if (mins < 1) mins = 1;
           _etaText = '$mins mins';
+        });
+      }
+    });
+  }
+
+  void _discoverHospitalsIfNeeded(EmergencyModel emergency) {
+    if (_lastDiscoveredEmergencyId == emergency.id) return;
+    _lastDiscoveredEmergencyId = emergency.id;
+    _isLoadingHospitals = true;
+
+    _hospitalService
+        .discoverNearbyHospitals(
+      location: LatLng(emergency.latitude, emergency.longitude),
+      emergencyId: emergency.id,
+    )
+        .then((hospitals) {
+      if (mounted) {
+        setState(() {
+          _nearbyHospitals = hospitals;
+          _isLoadingHospitals = false;
+        });
+      }
+    }).catchError((_) {
+      if (mounted) {
+        setState(() => _isLoadingHospitals = false);
+      }
+    });
+  }
+
+  void _selectHospitalForRouting(HospitalModel hospital, LatLng currentPos) {
+    setState(() {
+      _selectedHospital = hospital;
+      _isNavigatingToHospital = true;
+      _lastHospitalOrigin = null;
+      _lastHospitalRouteFetchTime = null;
+    });
+    _updateHospitalRouteIfNeeded(currentPos, hospital.location);
+    try {
+      _mapController.move(currentPos, 15.0);
+    } catch (_) {}
+  }
+
+  void _clearHospitalSelection() {
+    setState(() {
+      _selectedHospital = null;
+      _isNavigatingToHospital = false;
+      _hospitalRoutePolyline = [];
+      _hospitalDistanceMeters = 0.0;
+      _hospitalEtaText = '-- min';
+      _lastHospitalOrigin = null;
+      _lastHospitalRouteFetchTime = null;
+    });
+  }
+
+  bool _shouldRecalculateHospitalRoute(LatLng origin, LatLng destination) {
+    if (_isFetchingHospitalRoute) return false;
+    if (_lastHospitalOrigin == null || _lastHospitalRouteFetchTime == null) return true;
+
+    double originDelta = Geolocator.distanceBetween(
+      origin.latitude,
+      origin.longitude,
+      _lastHospitalOrigin!.latitude,
+      _lastHospitalOrigin!.longitude,
+    );
+
+    if (originDelta >= 8.0) return true;
+
+    if (_hospitalRoutePolyline.isEmpty &&
+        DateTime.now().difference(_lastHospitalRouteFetchTime!).inSeconds >= 15) {
+      return true;
+    }
+
+    return false;
+  }
+
+  void _updateHospitalRouteIfNeeded(LatLng origin, LatLng destination) {
+    double directDist = Geolocator.distanceBetween(
+      origin.latitude,
+      origin.longitude,
+      destination.latitude,
+      destination.longitude,
+    );
+
+    int mins = (directDist / 500).round();
+    if (mins < 1) mins = 1;
+    final String fallbackEta = mins <= 1 ? '1 min' : '$mins mins';
+
+    if (_mode == CommunicationMode.offline || widget.emergencyId.startsWith('JS-OFF-')) {
+      if (mounted) {
+        setState(() {
+          _hospitalRoutePolyline = [origin, destination];
+          _hospitalDistanceMeters = directDist;
+          _hospitalEtaText = fallbackEta;
+        });
+      }
+      return;
+    }
+
+    if (directDist <= 30.0) {
+      if (_hospitalDistanceMeters != directDist ||
+          _hospitalRoutePolyline.length != 2 ||
+          _hospitalEtaText != 'Arriving') {
+        if (mounted) {
+          setState(() {
+            _hospitalRoutePolyline = [origin, destination];
+            _hospitalDistanceMeters = directDist;
+            _hospitalEtaText = 'Arriving';
+          });
+        }
+      }
+      return;
+    }
+
+    if (!_shouldRecalculateHospitalRoute(origin, destination)) {
+      return;
+    }
+
+    _lastHospitalOrigin = origin;
+    _lastHospitalRouteFetchTime = DateTime.now();
+    _isFetchingHospitalRoute = true;
+
+    RoutingService.instance.fetchRoadRoute(origin, destination).then((res) {
+      _isFetchingHospitalRoute = false;
+      if (!mounted) return;
+
+      if (res != null && res.polylinePoints.length >= 2) {
+        setState(() {
+          _hospitalRoutePolyline = res.polylinePoints;
+          _hospitalDistanceMeters = res.distanceMeters;
+          _hospitalEtaText = res.etaText;
+        });
+      } else {
+        setState(() {
+          _hospitalRoutePolyline = [origin, destination];
+          _hospitalDistanceMeters = directDist;
+          _hospitalEtaText = fallbackEta;
+        });
+      }
+    }).catchError((_) {
+      _isFetchingHospitalRoute = false;
+      if (mounted) {
+        setState(() {
+          _hospitalRoutePolyline = [origin, destination];
+          _hospitalDistanceMeters = directDist;
+          _hospitalEtaText = fallbackEta;
         });
       }
     });
@@ -620,7 +948,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
       if (r.userRole == 'AMBULANCE_DRIVER') {
         markerIcon = Icons.local_hospital_rounded;
         markerColor = AppColors.emergencyRed;
-        label = '108 AMBULANCE';
+        label = 'AMBULANCE';
       } else if (r.userRole == 'POLICE_PCR') {
         markerIcon = Icons.local_police_rounded;
         markerColor = AppColors.brandBlue;
@@ -688,6 +1016,79 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
         ),
       );
     });
+
+    if (_isNavigatingToHospital && _selectedHospital != null) {
+      markers.add(
+        Marker(
+          point: _selectedHospital!.location,
+          width: 140,
+          height: 64,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.emergencyRed,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 4)],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.local_hospital_rounded, color: Colors.white, size: 12),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        _selectedHospital!.name,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.location_on_rounded, color: AppColors.emergencyRed, size: 28),
+            ],
+          ),
+        ),
+      );
+    } else if (emergency.status == EmergencyStatus.ARRIVED && emergency.isPrimaryResponder(_currentUserId)) {
+      for (final hosp in _nearbyHospitals.take(3)) {
+        markers.add(
+          Marker(
+            point: hosp.location,
+            width: 110,
+            height: 48,
+            child: GestureDetector(
+              onTap: () => _selectHospitalForRouting(hosp, _currentDeviceLatLng ?? victimPos),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfacePureWhite,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.emergencyRed, width: 1.2),
+                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 3)],
+                    ),
+                    child: Text(
+                      hosp.name,
+                      style: const TextStyle(color: AppColors.emergencyRed, fontWeight: FontWeight.bold, fontSize: 8),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const Icon(Icons.local_hospital_rounded, color: AppColors.emergencyRed, size: 18),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
 
     return markers;
   }
@@ -872,7 +1273,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
               const SizedBox(height: 8),
               Text(
                 _smsFallbackTriggered
-                    ? 'Emergency SMS dispatched to trusted contacts'
+                    ? 'Trusted-contact SMS ready to send'
                     : 'Auto-SMS fallback in ${_secondsRemainingForFallback ~/ 60}m ${(_secondsRemainingForFallback % 60).toString().padLeft(2, '0')}s',
                 style: AppTypography.caption.copyWith(
                   color: _smsFallbackTriggered ? AppColors.emeraldGreen : AppColors.textMuted,
@@ -933,6 +1334,80 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
         ),
         AppSpacing.gapVerticalMd,
 
+        // Secondary Background Hospital Discovery Card (Phase A)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surfacePureWhite,
+            borderRadius: AppShapes.card,
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.local_hospital_outlined, size: 16, color: AppColors.brandBlue),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Nearby Hospitals (Standby)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.deepNavy,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${_nearbyHospitals.length} Found',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Discovered in background for post-arrival transport. Primary goal is finding nearby responders.',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11.5),
+              ),
+              if (_nearbyHospitals.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                ..._nearbyHospitals.take(2).map((h) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2.5),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              h.name,
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.deepNavy),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            h.formattedDistance,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brandBlue),
+                          ),
+                        ],
+                      ),
+                    )),
+              ],
+            ],
+          ),
+        ),
+        AppSpacing.gapVerticalMd,
+
         // Cancel Emergency Action (Intentional Confirmation)
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
@@ -957,7 +1432,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     String headerSubtitle = 'A verified responder has accepted your request.';
 
     if (primary.userRole == 'AMBULANCE_DRIVER') {
-      headerSubtitle = '108 Ambulance #${primary.vehicleNumber ?? '108'} responding';
+      headerSubtitle = 'Ambulance #${primary.vehicleNumber ?? 'EMS'} responding';
     } else if (primary.userRole == 'POLICE_PCR') {
       headerSubtitle = 'PCR Unit #${primary.vehicleNumber ?? 'PCR-12'} approaching';
     }
@@ -1058,6 +1533,62 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
 
         // Status Timeline
         EmergencyTimelineWidget(status: emergency.status),
+        // Secondary Hospital Information Card for Victim (Phase B)
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.surfacePureWhite,
+            borderRadius: AppShapes.card,
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.local_hospital_outlined, size: 16, color: AppColors.brandBlue),
+                  SizedBox(width: 8),
+                  Text(
+                    'Nearby Hospitals (Standby)',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.deepNavy,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Available for medical handover if emergency transport is required.',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11),
+              ),
+              if (_nearbyHospitals.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                ..._nearbyHospitals.take(2).map((h) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              h.name,
+                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.deepNavy),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            h.formattedDistance,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brandBlue),
+                          ),
+                        ],
+                      ),
+                    )),
+              ],
+            ],
+          ),
+        ),
         AppSpacing.gapVerticalMd,
 
         // Cancel Action
@@ -1154,6 +1685,64 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                   ),
                 ),
               ),
+            ],
+          ),
+        ),
+        AppSpacing.gapVerticalMd,
+
+        // Secondary Hospital Information Card for Victim
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.surfacePureWhite,
+            borderRadius: AppShapes.card,
+            border: Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.local_hospital_outlined, size: 16, color: AppColors.brandBlue),
+                  SizedBox(width: 8),
+                  Text(
+                    'Nearby Hospitals (For Transport)',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.deepNavy,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Medical centers available for emergency handover if required.',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11),
+              ),
+              if (_nearbyHospitals.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                ..._nearbyHospitals.take(2).map((h) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              h.name,
+                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.deepNavy),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            h.formattedDistance,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brandBlue),
+                          ),
+                        ],
+                      ),
+                    )),
+              ],
             ],
           ),
         ),
@@ -1369,6 +1958,28 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
   Widget _buildNavigationHud(EmergencyModel emergency) {
     bool isArrived = emergency.status == EmergencyStatus.ARRIVED;
 
+    String hudTitle;
+    String hudSubtitle;
+    IconData hudIcon;
+    Color hudColor;
+
+    if (_isNavigatingToHospital && _selectedHospital != null) {
+      hudTitle = 'Route to selected hospital';
+      hudSubtitle = '${_selectedHospital!.name} • Hospital Transfer';
+      hudIcon = Icons.local_hospital_rounded;
+      hudColor = AppColors.brandBlue;
+    } else if (isArrived) {
+      hudTitle = 'At emergency scene • Assist victim';
+      hudSubtitle = '${emergency.type.toUpperCase()} • Victim Location';
+      hudIcon = Icons.verified_rounded;
+      hudColor = AppColors.emeraldGreen;
+    } else {
+      hudTitle = 'Proceed to emergency location';
+      hudSubtitle = '${emergency.type.toUpperCase()} • Victim Location';
+      hudIcon = Icons.navigation_rounded;
+      hudColor = AppColors.brandBlue;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
@@ -1380,16 +1991,10 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isArrived
-                  ? AppColors.emeraldGreen.withValues(alpha: 0.12)
-                  : AppColors.brandBlue.withValues(alpha: 0.12),
+              color: hudColor.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              isArrived ? Icons.verified_rounded : Icons.navigation_rounded,
-              color: isArrived ? AppColors.emeraldGreen : AppColors.brandBlue,
-              size: 20,
-            ),
+            child: Icon(hudIcon, color: hudColor, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1397,9 +2002,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isArrived
-                      ? 'At emergency scene • Assist victim'
-                      : 'Proceed to emergency location',
+                  hudTitle,
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
@@ -1408,7 +2011,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${emergency.type.toUpperCase()} • Victim Location',
+                  hudSubtitle,
                   style: AppTypography.caption.copyWith(
                     color: AppColors.textSecondary,
                     fontSize: 11,
@@ -1417,7 +2020,29 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
               ],
             ),
           ),
-          if (!isArrived) ...[
+          if (_isNavigatingToHospital && _selectedHospital != null) ...[
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  _hospitalEtaText,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.deepNavy,
+                  ),
+                ),
+                Text(
+                  _formatDistance(_hospitalDistanceMeters),
+                  style: AppTypography.caption.copyWith(
+                    color: AppColors.brandBlue,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ] else if (!isArrived) ...[
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -1450,23 +2075,99 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     );
   }
 
-  void _handleCallVictimOrHelpline() {
-    const channel = MethodChannel('plugins.flutter.io/url_launcher');
-    channel.invokeMethod('launch', {
-      'url': 'tel:112',
-      'useSafariVC': false,
-      'useWebView': false,
-      'enableJavaScript': false,
-      'enableDomStorage': false,
-      'universalLinksOnly': false,
-      'headers': {},
-    }).catchError((_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Dialing emergency helpline: 112')),
+  Future<void> _handleCallVictim(EmergencyModel emergency) async {
+    if (_isCallingVictim) return;
+    _isCallingVictim = true;
+
+    try {
+      final victimId = emergency.victimId;
+      if (victimId.trim().isEmpty) {
+        if (mounted) {
+          AppSnackbar.showWarning(context, 'Victim phone number is not available.');
+        }
+        return;
+      }
+
+      final profile = await AuthService().getUserProfile(victimId);
+      final phone = profile?.phoneNumber;
+
+      if (phone == null || phone.trim().isEmpty) {
+        if (mounted) {
+          AppSnackbar.showWarning(context, 'Victim phone number is not available.');
+        }
+        return;
+      }
+
+      final cleanNumber = EmergencyContactsService.normalizeDialerNumber(phone);
+      if (cleanNumber.isEmpty) {
+        if (mounted) {
+          AppSnackbar.showWarning(context, 'Victim phone number is invalid.');
+        }
+        return;
+      }
+
+      final launched = await EmergencyContactsService.launchDialer(cleanNumber);
+      if (!launched && mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+            title: Row(
+              children: [
+                const Icon(Icons.phone_rounded, color: AppColors.brandBlue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    profile?.name.isNotEmpty == true ? profile!.name : 'Victim Contact',
+                    style: AppTypography.subheading,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Could not open phone dialer automatically.', style: AppTypography.bodySecondary),
+                const SizedBox(height: 12),
+                const Text('Victim Phone Number:', style: AppTypography.caption),
+                const SizedBox(height: 4),
+                SelectableText(
+                  phone,
+                  style: AppTypography.bodyMedium.copyWith(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.brandBlue,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton.icon(
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                label: const Text('COPY NUMBER'),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: phone));
+                  if (ctx.mounted) {
+                    Navigator.of(ctx).pop();
+                    if (mounted) {
+                      AppSnackbar.showSuccess(context, 'Phone number copied to clipboard.');
+                    }
+                  }
+                },
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('CLOSE'),
+              ),
+            ],
+          ),
         );
       }
-    });
+    } finally {
+      _isCallingVictim = false;
+    }
   }
 
   Widget _buildPrimaryResponderControls(EmergencyModel emergency) {
@@ -1524,6 +2225,357 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
             color: AppColors.textSecondary,
           ),
         ),
+        if (isArrived) ...[
+          AppSpacing.gapVerticalSm,
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.emeraldGreen.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.emeraldGreen.withValues(alpha: 0.25)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: AppColors.emeraldGreen, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Victim Reached • Nearby hospitals ready for transfer',
+                    style: TextStyle(
+                      color: AppColors.deepNavy,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          AppSpacing.gapVerticalSm,
+
+          // Hospital Navigation State (Phase C & D)
+          if (_isNavigatingToHospital && _selectedHospital != null) ...[
+            // Phase D: Selected Hospital Route Card
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surfacePureWhite,
+                borderRadius: AppShapes.card,
+                border: Border.all(color: AppColors.brandBlue, width: 1.5),
+                boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 6)],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.local_hospital_rounded, size: 18, color: AppColors.brandBlue),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Route to selected hospital',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.deepNavy,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.brandBlue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _hospitalEtaText,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.brandBlue,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _selectedHospital!.name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.deepNavy,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_formatDistance(_hospitalDistanceMeters)} away • ${_selectedHospital!.address}',
+                    style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11.5),
+                  ),
+                  if (_mode == CommunicationMode.offline || widget.emergencyId.startsWith('JS-OFF-')) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningAmber.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.wifi_off_rounded, size: 14, color: AppColors.warningAmber),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Emergency communication available offline • Hospital road routing requires internet',
+                              style: TextStyle(fontSize: 10.5, color: AppColors.deepNavy, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.brandBlue,
+                        side: const BorderSide(color: AppColors.brandBlue),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                      label: const Text('Change Hospital', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      onPressed: _clearHospitalSelection,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            // Phase C: Choose Nearby Hospital Card
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surfacePureWhite,
+                borderRadius: AppShapes.card,
+                border: Border.all(color: AppColors.borderSubtle),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.local_hospital_outlined, size: 18, color: AppColors.emergencyRed),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Choose nearby hospital',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.deepNavy,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Nearby Hospitals (${_nearbyHospitals.length})',
+                        style: AppTypography.caption.copyWith(color: AppColors.textMuted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Select a hospital to route patient for emergency handover.',
+                    style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11.5),
+                  ),
+                  if (_mode == CommunicationMode.offline || widget.emergencyId.startsWith('JS-OFF-')) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningAmber.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.wifi_off_rounded, size: 14, color: AppColors.warningAmber),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Emergency communication available offline • Hospital road routing requires internet',
+                              style: TextStyle(fontSize: 10.5, color: AppColors.deepNavy, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  if (_isLoadingHospitals)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                        child: SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else if (_nearbyHospitals.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        'No registered hospitals found within search radius.',
+                        style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                      ),
+                    )
+                  else
+                    ..._nearbyHospitals.take(3).map((hosp) => Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: AppColors.brandBlue.withValues(alpha: 0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.local_hospital_rounded, size: 16, color: AppColors.brandBlue),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      hosp.name,
+                                      style: const TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.deepNavy,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 1),
+                                    Text(
+                                      '${hosp.formattedDistance} • ${hosp.etaText}',
+                                      style: AppTypography.caption.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.brandBlue,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  minimumSize: const Size(0, 34),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () {
+                                  LatLng currentPos = _currentDeviceLatLng ?? LatLng(emergency.latitude, emergency.longitude);
+                                  _selectHospitalForRouting(hosp, currentPos);
+                                },
+                                child: const Text(
+                                  'Route',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )),
+                ],
+              ),
+            ),
+          ],
+        ] else ...[
+          // Phase B: Standby Hospital Card (Secondary Info before arrival)
+          AppSpacing.gapVerticalSm,
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.surfacePureWhite,
+              borderRadius: AppShapes.card,
+              border: Border.all(color: AppColors.borderSubtle),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.local_hospital_outlined, size: 16, color: AppColors.brandBlue),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Nearby Hospitals (Standby)',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.deepNavy,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_nearbyHospitals.length} Found',
+                      style: AppTypography.caption.copyWith(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Hospital routing will become active after reaching victim.',
+                  style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11),
+                ),
+                if (_nearbyHospitals.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  ..._nearbyHospitals.take(2).map((h) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                h.name,
+                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.deepNavy),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              h.formattedDistance,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brandBlue),
+                            ),
+                          ],
+                        ),
+                      )),
+                ],
+              ],
+            ),
+          ),
+        ],
         AppSpacing.gapVerticalMd,
 
         // Essential Actions: [ Call ] & [ Report Problem ]
@@ -1539,7 +2591,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                 ),
                 icon: const Icon(Icons.call_rounded, size: 18, color: AppColors.brandBlue),
                 label: const Text('Call', style: TextStyle(fontWeight: FontWeight.bold)),
-                onPressed: _handleCallVictimOrHelpline,
+                onPressed: () => _handleCallVictim(emergency),
               ),
             ),
             const SizedBox(width: 10),
@@ -1698,6 +2750,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     if (!isCancelled && !isCompleted) {
       _initEmergencyLocationStream(isVictim);
       _checkAndStartFallbackTimer(emergency, isVictim);
+      _discoverHospitalsIfNeeded(emergency);
       if (isVictim && primary != null) {
         EmergencySoundService.playVictimReceivedHelper(emergency.id, primary.userName);
       }
@@ -1706,6 +2759,15 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
       _fallbackSmsTimer = null;
       EmergencySoundService.stopSound();
       _locationService.stopEmergencyLocationUpdates();
+
+      // Clean up hospital routing state on completed or cancelled
+      if (_isNavigatingToHospital || _selectedHospital != null) {
+        _isNavigatingToHospital = false;
+        _selectedHospital = null;
+        _hospitalRoutePolyline = [];
+        _hospitalDistanceMeters = 0.0;
+        _hospitalEtaText = '-- min';
+      }
 
       if (isVictim && isCompleted && primary != null && !_hasShownVictimFeedback) {
         _hasShownVictimFeedback = true;
@@ -1727,37 +2789,75 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     LatLng? primaryPos = primary != null ? LatLng(primary.latitude, primary.longitude) : null;
     LatLng? originForRoute = isPrimary ? (_currentDeviceLatLng ?? primaryPos) : primaryPos;
 
-    if (!isOffline && originForRoute != null && !isCancelled && !isCompleted) {
-      if (_shouldRecalculateRoute(originForRoute, victimPos)) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _updateRouteIfNeeded(originForRoute, victimPos);
-        });
+    if (!isCancelled && !isCompleted) {
+      if (isPrimary && _isNavigatingToHospital && _selectedHospital != null) {
+        LatLng hospitalOrigin = _currentDeviceLatLng ?? victimPos;
+        if (_shouldRecalculateHospitalRoute(hospitalOrigin, _selectedHospital!.location)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _updateHospitalRouteIfNeeded(hospitalOrigin, _selectedHospital!.location);
+          });
+        }
+      } else if (!isOffline && originForRoute != null && emergency.status != EmergencyStatus.ARRIVED) {
+        if (_shouldRecalculateRoute(originForRoute, victimPos)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _updateRouteIfNeeded(originForRoute, victimPos);
+          });
+        }
       }
     }
 
     List<Marker> markers = _buildResponderMarkers(emergency, victimPos);
-    List<Polyline> polylines = (!isOffline && _mode == CommunicationMode.online && _routePolyline.isNotEmpty && !isCancelled && !isCompleted)
-        ? [
-            Polyline(
-              points: _routePolyline,
-              strokeWidth: 5.0,
-              color: AppColors.brandBlue,
-              borderColor: const Color(0xFF1E40AF),
-              borderStrokeWidth: 1.5,
-            ),
-          ]
-        : [];
+    List<Polyline> polylines = [];
+    if (!isCancelled && !isCompleted) {
+      if (_isNavigatingToHospital && _hospitalRoutePolyline.isNotEmpty) {
+        polylines = [
+          Polyline(
+            points: _hospitalRoutePolyline,
+            strokeWidth: 5.0,
+            color: AppColors.brandBlue,
+            borderColor: const Color(0xFF1E40AF),
+            borderStrokeWidth: 1.5,
+          ),
+        ];
+      } else if (!isOffline && _mode == CommunicationMode.online && _routePolyline.isNotEmpty && emergency.status != EmergencyStatus.ARRIVED) {
+        polylines = [
+          Polyline(
+            points: _routePolyline,
+            strokeWidth: 5.0,
+            color: AppColors.brandBlue,
+            borderColor: const Color(0xFF1E40AF),
+            borderStrokeWidth: 1.5,
+          ),
+        ];
+      }
+    }
 
-    return Scaffold(
-      backgroundColor: AppColors.warmOffWhite,
-      appBar: AppBar(
-        backgroundColor: AppColors.surfacePureWhite,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.deepNavy),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+    return PopScope<Object?>(
+      canPop: !emergency.isActive,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleSafeHomeNavigation(emergency);
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.warmOffWhite,
+        appBar: AppBar(
+          backgroundColor: AppColors.surfacePureWhite,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          leading: IconButton(
+            icon: Icon(
+              emergency.isActive ? Icons.home_rounded : Icons.arrow_back_rounded,
+              color: AppColors.deepNavy,
+            ),
+            tooltip: emergency.isActive ? 'Home' : 'Back',
+            onPressed: () {
+              if (emergency.isActive) {
+                _handleSafeHomeNavigation(emergency);
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
         title: Text(
           isCancelled
               ? 'Emergency Cancelled'
@@ -1766,7 +2866,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                   : isVictim
                       ? (isOffline ? 'Offline Emergency' : 'Live Assistance')
                       : isPrimary
-                          ? 'Navigating to Victim'
+                          ? (_isNavigatingToHospital ? 'Route to Hospital' : 'Navigating to Victim')
                           : isStandby
                               ? 'On Standby'
                               : 'Emergency Map',
@@ -1842,12 +2942,12 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                   padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
                   child: Builder(
                     builder: (context) {
-                      if (isVictim) {
-                        if (isCancelled) {
-                          return _buildCancelledPanel();
-                        } else if (isCompleted) {
-                          return _buildCompletedPanel(emergency, primary);
-                        } else if (emergency.status == EmergencyStatus.ARRIVED) {
+                      if (isCancelled) {
+                        return _buildCancelledPanel();
+                      } else if (isCompleted) {
+                        return _buildCompletedPanel(emergency, primary);
+                      } else if (isVictim) {
+                        if (emergency.status == EmergencyStatus.ARRIVED) {
                           return _buildArrivedPanel(emergency, primary);
                         } else if (emergency.status == EmergencyStatus.ASSIGNED ||
                             emergency.status == EmergencyStatus.APPROACHING) {
@@ -1858,13 +2958,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
                           return _buildSearchingPanel(emergency, isOffline);
                         }
                       } else if (isPrimary) {
-                        if (isCancelled) {
-                          return _buildCancelledPanel();
-                        } else if (isCompleted) {
-                          return _buildCompletedPanel(emergency, primary);
-                        } else {
-                          return _buildPrimaryResponderControls(emergency);
-                        }
+                        return _buildPrimaryResponderControls(emergency);
                       } else if (isStandby) {
                         return _buildStandbyControls();
                       } else {
@@ -1878,25 +2972,24 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
-    if (widget.initialEmergency != null) {
-      return _buildMapContent(widget.initialEmergency!);
-    }
-
     bool isOffline = widget.emergencyId.startsWith('JS-OFF-');
 
     if (isOffline) {
-      return FutureBuilder<EmergencyModel?>(
-        future: _localDb.getEmergencyById(widget.emergencyId),
+      return StreamBuilder<EmergencyModel?>(
+        initialData: widget.initialEmergency,
+        stream: _localDb.streamEmergency(widget.emergencyId),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          final emergency = snapshot.data ?? widget.initialEmergency;
+          if (snapshot.connectionState == ConnectionState.waiting && emergency == null) {
             return const Scaffold(body: AppLoadingWidget());
           }
-          if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+          if (emergency == null) {
             return Scaffold(
               appBar: AppBar(
                 leading: IconButton(
@@ -1914,18 +3007,27 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
               ),
             );
           }
-          return _buildMapContent(snapshot.data!);
+          return _buildMapContent(emergency);
         },
       );
     }
 
+    Stream<EmergencyModel> emergencyStream;
+    try {
+      emergencyStream = _emergencyService.streamEmergency(widget.emergencyId);
+    } catch (e) {
+      emergencyStream = Stream.error(e);
+    }
+
     return StreamBuilder<EmergencyModel>(
-      stream: _emergencyService.streamEmergency(widget.emergencyId),
+      initialData: widget.initialEmergency,
+      stream: emergencyStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+        final emergency = snapshot.data ?? widget.initialEmergency;
+        if (snapshot.connectionState == ConnectionState.waiting && emergency == null) {
           return const Scaffold(body: AppLoadingWidget());
         }
-        if (snapshot.hasError || !snapshot.hasData) {
+        if (emergency == null) {
           return Scaffold(
             appBar: AppBar(
               leading: IconButton(
@@ -1941,7 +3043,7 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
             ),
           );
         }
-        return _buildMapContent(snapshot.data!);
+        return _buildMapContent(emergency);
       },
     );
   }

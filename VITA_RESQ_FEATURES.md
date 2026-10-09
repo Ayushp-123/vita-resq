@@ -43,7 +43,7 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **Automated 3-Minute Fallback Timer** | ✅ IMPLEMENTED | 180-second countdown in victim map screen; if no responder claims incident, prompts or dispatches emergency SMS to family. | `EmergencyMapScreen._checkAndStartFallbackTimer` with live countdown HUD. |
 | **Play Store-Compliant Emergency SMS** | ✅ IMPLEMENTED | Generates pre-formatted emergency SMS with victim name, blood group, and Google Maps live link, opened via system SMS intent. | `EmergencyContactsService.sendEmergencySMS` via `url_launcher` (`sms:?body=...`) without dangerous `SEND_SMS`. |
 | **1-Tap WhatsApp Emergency Dispatch** | ✅ IMPLEMENTED | Formats and dispatches critical emergency alert directly to WhatsApp contacts with live coordinate link. | `EmergencyContactsService.sendEmergencyWhatsApp` via `whatsapp://send` and `https://wa.me/` URLs. |
-| **Official Emergency Helplines (112, 108, 100, 101)** | ✅ IMPLEMENTED | Direct 1-tap phone dialer strip on Home Dashboard and Navigation Drawer for national emergency services. | `url_launcher` (`tel:112`, `tel:108`, `tel:100`, `tel:101`). |
+| **Legacy Helpline Shortcuts (112, 108, 100, 101)** | ❌ REMOVED | Legacy Jan Sarthi quick-dial phone buttons removed. Vita ResQ serves as a civilian mutual-aid network and does not replace official 112 emergency services. Emergency contacts, SMS intent dispatch, and SOS coordinator remain active. | Removed quick-dial buttons from UI; neutral "112 Primary" safety disclaimer retained. |
 
 ---
 
@@ -79,7 +79,7 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **Direct Haversine Route Fallback** | ✅ IMPLEMENTED | Calculates straight-line bearing, direct distance, and estimated walking ETA when offline or when OSRM fails. | `EmergencyMapScreen` computes direct 2-point line `[origin, destination]` and Haversine distance. |
 | **Dynamic Turn-by-Turn ETA Calculation** | ✅ IMPLEMENTED | Calculates remaining travel time in minutes based on real-time road distance and urban emergency vehicle speeds. | Calculated dynamically in `OSRMRoutingService` and `EmergencyMapScreen`. |
 | **100-Meter Geofenced Scene Arrival** | ✅ IMPLEMENTED | Automatically verifies whether responder GPS is within 100 meters of victim before allowing "ARRIVED" status. | `EmergencyMapScreen._handleArrivedPressed` checks `Geolocator.distanceBetween <= 100.0m`. |
-| **Hospital Discovery & Navigation** | 🔮 FUTURE / NOT IMPLEMENTED | Automated discovery and routing to nearest trauma centers and hospitals. | Not present in current codebase; reserved for future Phase P5 release. |
+| **Hybrid Hospital Discovery & Rescue Routing** | ✅ IMPLEMENTED | Prepares nearby hospitals in background during SOS/searching; maintains victim-first routing for primary responder until arrival; transitions to hospital transport on ARRIVED status; routes to chosen hospital using existing Flutter Map & OSRM routing; enforces offline disclaimers. | `HospitalService` (`IHospitalService`) + `EmergencyMapScreen` + `EmergencyDetailsScreen`. |
 
 ---
 
@@ -92,7 +92,7 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **Strict Cloud Security Rules** | ✅ IMPLEMENTED | Canonical production rules enforcing profile ownership, authenticated emergency creation, radius limits, and deny-by-default. | [firestore.rules](file:///D:/vitaxq/firestore.rules) enforcing `request.auth.uid == victimId` and bounded radius. |
 | **Nearby Incident Discovery Stream** | ✅ IMPLEMENTED | Streams active `SEARCHING` emergencies within radius to nearby online volunteers and emergency vehicles. | `EmergencyService.streamNearbySearchingEmergencies` with Haversine distance filtering. |
 | **Multi-Responder Atomic Claim Transaction** | ✅ IMPLEMENTED | Concurrently manages primary and standby responders without race conditions or split-brain overwrites. | `EmergencyClaimService.acceptAndRespond` using Firestore atomic `runTransaction`. |
-| **FCM Push Notification Handling** | ✅ IMPLEMENTED | Handles incoming Firebase Cloud Messaging alert payloads in foreground, background, and cold-start terminated states. | `NotificationService` listening to `FirebaseMessaging.onMessage` and `onMessageOpenedApp`. |
+| **FCM Push Notification Handling** | ✅ IMPLEMENTED | Handles incoming Firebase Cloud Messaging alert payloads with high-importance channel (`vita_resq_emergency_alerts`), heads-up display, sound, vibration, and direct cold-start/background tap routing to emergency details. | `NotificationService` listening to `FirebaseMessaging.onMessage`, `onMessageOpenedApp`, and native `getLaunchEmergencyId`. |
 | **Cloud Function Background Dispatch** | ⚠️ PARTIAL / LIMITED | Server-side trigger that calculates Haversine distance to registered users and dispatches FCM notifications on emergency creation. | [functions/index.js](file:///D:/vitaxq/functions/index.js) (`onEmergencyUpdated`); currently performs an $O(N)$ full-collection scan on `users`. |
 | **Offline-to-Online Cloud Synchronization** | ✅ IMPLEMENTED | Uploads local offline emergency records (`JS-OFF-`) to Cloud Firestore once internet connectivity is restored. | `CommunicationManager.syncOfflineEmergencyToFirestore` querying unsynced records from `LocalDatabaseService`. |
 
@@ -113,6 +113,7 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **P2P Live Location & Status Propagation** | ✅ IMPLEMENTED | Transmits coordinate updates and status changes (`ARRIVED`, `COMPLETED`, `CANCELLED`) across direct RF sockets. | `OfflineNearbyService.sendStatusUpdatePayload` with JSON payload transmission. |
 | **Pure-Dart SHA-256 Payload Signing** | ✅ IMPLEMENTED | Signs all outgoing P2P JSON byte packets with cryptographic SHA-256 signature using FIPS 180-4 standard algorithm. | `P2PPayloadIntegrity.signPayload` computes signature using canonical payload keys + application salt. |
 | **Constant-Time Tamper & Spoof Detection** | ✅ IMPLEMENTED | Validates incoming P2P packets against recomputed hash using constant-time comparison, rejecting tampered coordinates. | `P2PPayloadIntegrity.verifyPayload` detecting payload manipulation or replay attacks. |
+| **Offline P2P Local Emergency Notifications** | ✅ IMPLEMENTED | Generates native heads-up local notifications when an offline Nearby Connections SOS packet is discovered while app is in background or foreground. | `OfflineCommunicationService.listenForAlerts` invoking `NotificationService.showEmergencyAlertNotification(isOffline: true)`. |
 | **Physical Multi-Device RF Range Testing** | 📱 DEVICE TEST REQUIRED | Field testing of Bluetooth LE (~10–30m) and Wi-Fi Direct (~50–100m) radio range across multiple physical hardware models. | Validated in automated test suites; physical field testing required for real-world environmental benchmarking. |
 | **Multi-Hop / True Mesh Packet Relaying** | 🔮 FUTURE / NOT IMPLEMENTED | Multi-hop store-and-forward relaying across intermediate non-adjacent nodes. | The current architecture is strictly direct 1-hop P2P (`Strategy.P2P_STAR`); multi-hop mesh is a future research goal. |
 
@@ -132,6 +133,7 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **Primary Responder Problem / Delay Reporting** | ✅ IMPLEMENTED | Allows primary helper to report traffic delays (minor) or vehicle breakdown/medical emergency (fatal). | `EmergencyService.reportProblem` / `AppDialogs.showReportProblemDialog`. |
 | **Automatic Standby-to-Primary Failover** | ✅ IMPLEMENTED | Promotes closest standby volunteer to `PRIMARY` if lead helper reports fatal breakdown; resets to `SEARCHING` if none available. | `EmergencyService.reportProblem` and `ResponderReliabilityMonitor.promoteStandbyToPrimary`. |
 | **120-Second Stationary Stall Detection** | ✅ IMPLEMENTED | Monitors primary helper progress toward victim; detects stationary stalls (e.g. trapped in traffic or injured) after 120 seconds. | `ResponderReliabilityMonitor` with `noProgressThresholdSeconds = 120`. |
+| **Responder Availability / Background Mode ("Responder Available")** | ✅ IMPLEMENTED | Explicit toggle on Home Dashboard; starts Android Foreground Service (`ResponderForegroundService`) with ongoing low-noise system notification, keeps Firestore and Nearby Connections listeners alive while app process remains alive (screen locked or in pocket), and delivers high-importance heads-up notifications with direct tap routing to `EmergencyDetailsScreen`. Zero Cloud Functions, zero Blaze billing, zero paid backends required. | `ResponderModeService`, `HomeScreen._buildResponderAvailabilityCard`, `ResponderForegroundService.kt`, `MainActivity.kt`. |
 
 ---
 
@@ -154,8 +156,9 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 
 | Feature | Status | What it does | Where/How it works |
 | :--- | :---: | :--- | :--- |
-| **FCM Push Notification Service** | ✅ IMPLEMENTED | Receives cloud emergency alert notifications on responder devices with custom sound and vibration. | `NotificationService` handling `FirebaseMessaging` foreground and background events. |
-| **Role-Based Emergency Sirens** | ✅ IMPLEMENTED | Emits distinct audio sirens tailored to responder role: 108 Ambulance siren loop (800ms), Police tactical siren loop (600ms), Citizen alert tone. | `EmergencySoundService.playEmergencyAlert` based on `userRole`. |
+| **Zero-Billing Background Responder Alerting** | ✅ IMPLEMENTED | Delivers high-importance local notifications (sound, vibration, heads-up display on channel `vita_resq_emergency_alerts`) for nearby qualifying emergencies without requiring Firebase Blaze billing, Cloud Functions, or OneSignal. Keeps process alive via Android Foreground Service while responder mode is enabled. | `ResponderModeService`, `ResponderForegroundService.kt`, `NotificationService`. |
+| **FCM Push Notification Service** | ⚠️ CONDITIONAL | Inbound push alerting for deeply terminated apps. Replaced for normal background responder mode by zero-billing Android Foreground Service (`ResponderModeService`). Running cloud function `onEmergencyUpdated` requires upgrading Firebase to Blaze pay-as-you-go billing. | Client: `NotificationService` & `MainActivity.kt`. Server: `functions/index.js:onEmergencyUpdated` (requires billing upgrade). |
+| **Role-Based Emergency Sirens** | ✅ IMPLEMENTED | Emits distinct audio sirens tailored to responder role: Ambulance siren loop (800ms), Police tactical siren loop (600ms), Citizen alert tone. | `EmergencySoundService.playEmergencyAlert` based on `userRole`. |
 | **Vibration & Haptic Feedback Engine** | ✅ IMPLEMENTED | Delivers tactile feedback patterns: heavy impact on hold start, double haptic on crash alarm, pulse on arrival. | `HapticFeedback` method channel integration in `EmergencySoundService` and `SOSButton`. |
 | **Accident Warning Siren & Countdown Ticks** | ✅ IMPLEMENTED | Plays warning siren followed by periodic countdown tick sounds during the 15-second collision verification window. | `EmergencySoundService.playAccidentWarning` and `playCountdownBeep`. |
 | **SOS Sent Confirmation Chime** | ✅ IMPLEMENTED | Plays audio chime and double haptic confirmation the instant SOS dispatch completes successfully. | `EmergencySoundService.playSOSSentSound`. |
@@ -216,11 +219,10 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 | **Vita ResQ Product Identity & Tokens** | ✅ IMPLEMENTED | Comprehensive brand identity featuring Deep Slate Navy (`0xFF0F172A`), Emergency Red (`0xFFDC2626`), Emerald Green, and High-Vis Amber. | Defined in `AppTheme` and applied across all screens. |
 | **Ambient Radar Pulse Animation** | ✅ IMPLEMENTED | Renders gentle ambient ripple rings behind idle SOS button to indicate active readiness and guide user focus. | `SOSButton._buildAmbientRadarRing` powered by continuous 2,600ms `AnimationController`. |
 | **Press-and-Hold Progress Visualizer** | ✅ IMPLEMENTED | Displays continuous high-contrast circular progress stroke while user holds SOS button, filling completely at 2.0s. | Custom painter in `SOSButton` with linear progress curve. |
-| **Floating Status HUD on Map** | ✅ IMPLEMENTED | Floating pill at top of map displaying responder identity, vehicle number, distance, and dynamic ETA. | `EmergencyMapScreen` top HUD with Material 3 elevation. |
-| **Quick Emergency Number Action Strip** | ✅ IMPLEMENTED | Quick-dial buttons for national helplines: **112** (All-in-One), **108** (Ambulance), **100** (Police), **101** (Fire). | Persistent horizontal action bar on `HomeScreen`. |
-| **User Navigation Drawer** | ✅ IMPLEMENTED | Side drawer providing quick navigation to Profile, Emergency History, Emergency Helplines, and Demo Simulation Tools. | `HomeScreen.drawer` with user header and navigation tiles. |
-| **National Emergency Disclaimer** | ✅ IMPLEMENTED | Prominent disclaimer informing users that Vita ResQ is a civilian bystander mobilization tool and does not replace official 112 services. | Displayed on `HomeScreen` footer and in `AppConstants.emergencyDisclaimer`. |
-| **WCAG AA Accessible Touch Targets** | ✅ IMPLEMENTED | All interactive controls, SOS buttons, and helpline cards maintain minimum 48x48dp touch targets and high-contrast color ratios. | Verified in `test/p2_ui_test.dart`. |
+| **Neutral Safety Disclaimer & Status** | ✅ IMPLEMENTED | Prominent neutral safety disclaimers informing users that Vita ResQ is a community emergency-response platform and does not replace official emergency services. Zero numbered buttons/badges (112/108/100/101). | `HomeScreen` status banner ("Official primary"), expandable drawer details, and `AppDrawer` footer. |
+| **User Navigation Drawer** | ✅ IMPLEMENTED | Side drawer providing quick navigation to Profile, Emergency History, Emergency Contacts, and Demo Simulation Tools. | `HomeScreen.drawer` with user header and navigation tiles. |
+| **Neutral Platform Disclaimer** | ✅ IMPLEMENTED | Clear statement that Vita ResQ connects civilian community responders and does NOT replace official emergency services. | Displayed on `HomeScreen` expandable details, `AppDrawer` footer, and splash screen footer. |
+| **WCAG AA Accessible Touch Targets** | ✅ IMPLEMENTED | All interactive controls and SOS buttons maintain minimum 48x48dp touch targets and high-contrast color ratios. | Verified in `test/phase9_final_ui_qa_test.dart`. |
 
 ---
 
@@ -248,7 +250,24 @@ Vita ResQ is a mission-critical civilian bystander emergency response applicatio
 4. **Volunteer History Query Client Filtering:** `EmergencyHistoryScreen` Tab 2 ("Victims Helped") performs client-side filtering on emergency records rather than a composite indexed array query.
 5. **Physical Vehicle Crash Testing:** Sensor evaluation is verified via mathematical models, sensor stream tests, and synthetic demo injection; real-world vehicle collision testing has not been performed.
 6. **Shared-Salt P2P Cryptographic Signing:** P2P integrity uses application-salted SHA-256 (FIPS 180-4); per-device asymmetric public/private keypairs (Ed25519) are not yet implemented.
-7. **OEM Android Background Restrictions:** Extended background execution and screen-off Nearby scanning can be throttled by aggressive manufacturer battery optimization (Doze mode) unless user exempts app from battery optimization.
+7. **Responder Background Mode Scope & Android Foreground-Service Compliance:**
+   - **Guaranteed Scope & Standard Compliance Wording:** *"Responder Mode keeps Vita ResQ active in the background while the service remains running and permitted by Android. Device/OEM restrictions may terminate it."*
+   - **Process-Alive & Lifecycle Requirement:** Does **NOT** claim to function when the Android process has been completely terminated or killed. It guarantees background alerting only while the foreground service process remains alive and permitted by Android.
+   - **FGS Type Decision (`dataSync`):**
+     - Evaluated `dataSync`, `connectedDevice`, and `dataSync|connectedDevice`.
+     - `dataSync` was chosen as primary and authoritative because the service's primary function in responder availability is continuous real-time Cloud Firestore emergency document synchronization (`OnlineCommunicationService`).
+     - `connectedDevice` is intended by Google Play policy for dedicated external companion accessories (smartwatches, sensors); using it for peer mobile phones over Nearby Connections risks Play Store rejection and does not cover cloud listening. Combining types also does not exempt `dataSync` from Android 15 limits.
+   - **Android 15+ 6-Hour Timeout (`Service.onTimeout`):**
+     - Android 15 (API 35+) places a strict 6-hour runtime limit on `dataSync` foreground services within a 24-hour window while backgrounded.
+     - Implemented `ResponderForegroundService.onTimeout(startId, fgsType)`: safely terminates the foreground service within seconds to prevent `RemoteServiceException` crashes.
+     - Displays a clear user-facing system notification: *"Vita ResQ — Responder Mode Paused: Android 6-hour background limit reached. Open Vita ResQ to resume responder mode."*
+     - Dispatches `onResponderModeTimedOut` method call to Flutter, resetting `isAvailable` to `false` and cancelling Dart listeners. Bringing Vita ResQ to the foreground resets the 6-hour quota.
+   - **Zero Arbitrary Background FGS Startup:** The foreground service is started strictly and exclusively from an explicit user tap on "Go Available" in `HomeScreen`. Cold-start initialization (`initialize()`) queries `isResponderForegroundServiceRunning` to synchronize state without attempting silent background service starts.
+   - **OEM Battery Restrictions:** Devices with aggressive vendor task managers (Xiaomi HyperOS/MIUI, Samsung One UI, Oppo ColorOS, OnePlus OxygenOS) may terminate background processes unless the user manually grants *"Unrestricted Battery"* and enables *"Autostart"* in system settings.
+   - **System Stop / Force-Stop:** An Android system stop, extreme OOM low-memory kill, or user force-stop terminates the foreground service and listeners.
+   - **Notification Permissions:** Notification delivery depends on user permissions (Android 13+ `POST_NOTIFICATIONS`) and device sound/vibration profile settings.
+   - **Battery Tradeoff:** Maintaining active Firestore listeners and Nearby RF sockets in a foreground service uses additional battery. Hence, Responder Mode is strictly opt-in and user-controlled via the "Go Available" / "Stop responding" card.
+   - **Rationale for Replacing Cloud Functions:** Firebase Cloud Functions require upgrading to a paid Blaze billing plan to enable Google Cloud Build and Artifact Registry APIs. The foreground-service architecture delivers reliable zero-billing, zero-backend civilian mutual-aid notifications without recurring infrastructure costs or third-party vendors (e.g. OneSignal).
 8. **Live Cloud Rules Deployment Block:** Canonical production rules are ready in `firestore.rules`, but cloud deployment to Firebase project `vita-resq` requires developer CLI authentication (`firebase login`) or manual publication in Firebase Console.
 
 ---
@@ -286,4 +305,4 @@ Use this checklist for live testing, PPT presentations, and judge demonstrations
 - [ ] **14. Crash Detection Demo (Judge Demo):** Open Drawer $\rightarrow$ tap "Simulate Crash (Judge Demo)"; observe 15-second modal warning, siren audio, and "I'M OKAY" button.
 - [ ] **15. Autonomous Offline P2P Flow:** Enable Airplane mode on both devices; hold SOS; verify `JS-OFF-` beacon broadcast, discovery, and claim over Nearby Connections.
 - [ ] **16. Emergency SMS / WhatsApp Fallback:** Tap "SEND SMS NOW" or "WHATSAPP" on map screen; verify pre-filled coordinates and Google Maps link in external app.
-- [ ] **17. Official 112 Helpline Disclaimer:** Verify 112/108 quick-dial strip and prominent civilian bystander disclaimer on Home Dashboard.
+- [ ] **17. Neutral Platform Safety Disclaimer:** Verify neutral platform disclaimer in Home Drawer and expandable status banner with zero numbered shortcut buttons or badges (112/108/100/101).

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import '../core/constants/app_constants.dart';
+import 'responder_mode_service.dart';
 
 class AuthService {
   final FirebaseAuth? _injectedAuth;
@@ -254,6 +255,10 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    try {
+      await ResponderModeService.instance.stopResponderMode();
+    } catch (_) {}
+
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_localUserKey);

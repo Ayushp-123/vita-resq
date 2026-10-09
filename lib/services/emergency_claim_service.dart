@@ -10,6 +10,7 @@ import 'offline_nearby_service.dart';
 import 'local_database_service.dart';
 import 'auth_service.dart';
 import 'impact_reward_service.dart';
+import 'p2p_diagnostics.dart';
 
 class EmergencyClaimService {
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
@@ -56,30 +57,44 @@ class EmergencyClaimService {
       EmergencyModel? localEmergency = await _localDb.getEmergencyById(emergencyId);
       if (localEmergency == null) return null;
 
+      final myDeviceId = await LocalDatabaseService.getOrCreateLocalDeviceId();
+      final isOwnDevice = localEmergency.originDeviceId != null && localEmergency.originDeviceId == myDeviceId;
+      final isOwnAuthUser = currentUser != null && localEmergency.victimId == currentUser.uid;
+
       // Authoritative check: Victim cannot volunteer for their own emergency
-      if (localEmergency.victimId == userId) {
+      if (isOwnDevice || isOwnAuthUser) {
+        P2PDiagnostics.log(emergencyId, 'CLAIM_REJECTED_SELF', {
+          'isOwnDevice': isOwnDevice,
+          'isOwnAuthUser': isOwnAuthUser,
+        });
         return null;
       }
 
       // Authoritative check: Cannot claim closed or inactive emergency
       if (localEmergency.isClosed || !localEmergency.isActive) {
+        P2PDiagnostics.log(emergencyId, 'CLAIM_REJECTED_INACTIVE', {'status': localEmergency.status.name});
         return null;
       }
 
+      // Distinct offline participant identity (does not pose as a fake Firebase UID)
+      String participantId = currentUser?.uid ?? 'offline_helper_$myDeviceId';
+      String responderId = participantId;
+
       // Duplicate acceptance protection: If already a responder, return current role
-      if (localEmergency.responders.containsKey(userId)) {
-        return localEmergency.responders[userId]?.role;
+      if (localEmergency.responders.containsKey(responderId)) {
+        return localEmergency.responders[responderId]?.role;
       }
 
-      String requestId = '${emergencyId}_${userId}_${DateTime.now().millisecondsSinceEpoch}';
+      String requestId = '${emergencyId}_${responderId}_${DateTime.now().millisecondsSinceEpoch}';
 
       // If connected to P2P peer(s), execute explicit two-way request/ack handshake
       if (_offlineNearbyService.hasConnectedPeers) {
         await _offlineNearbyService.sendClaimRequest(
           requestId: requestId,
           emergencyId: emergencyId,
-          responderId: userId,
+          responderId: responderId,
           responderName: userName,
+          originDeviceId: myDeviceId,
           phoneNumber: phoneNumber,
           bloodGroup: bloodGroup,
           userRole: userRole,
@@ -94,13 +109,14 @@ class EmergencyClaimService {
                 (data) =>
                     data['eventType'] == 'CLAIM_ACK' &&
                     data['emergencyId'] == emergencyId &&
-                    data['responderId'] == userId &&
+                    data['responderId'] == responderId &&
                     (data['requestId'] == null || data['requestId'] == requestId),
               )
               .timeout(const Duration(seconds: 4));
 
           bool accepted = ack['accepted'] == true;
           if (!accepted) {
+            P2PDiagnostics.log(emergencyId, 'CLAIM_ACK_REJECTED_BY_VICTIM', {'reason': ack['reason']});
             return null;
           }
 
@@ -116,7 +132,7 @@ class EmergencyClaimService {
           Map<String, dynamic> confirmedPayload = {
             'eventType': 'RESPONDER_ACCEPTANCE',
             'emergencyId': emergencyId,
-            'responderId': userId,
+            'responderId': responderId,
             'responderName': userName,
             'phoneNumber': phoneNumber,
             'bloodGroup': bloodGroup,
@@ -130,10 +146,11 @@ class EmergencyClaimService {
           };
 
           await OfflineNearbyService.processAcceptancePayload(confirmedPayload, _localDb);
-          await ImpactRewardService().recordEmergencyAccepted(userId, emergencyId);
+          await ImpactRewardService().recordEmergencyAccepted(responderId, emergencyId);
+          P2PDiagnostics.log(emergencyId, 'CLAIM_SUCCESSFUL_P2P', {'role': assignedRole.name});
           return assignedRole;
         } catch (e) {
-          // Timeout or failure awaiting ack: do not claim to avoid inconsistent split-brain state
+          P2PDiagnostics.log(emergencyId, 'CLAIM_HANDSHAKE_TIMEOUT', {'error': e.toString()});
           return null;
         }
       } else {
@@ -147,7 +164,7 @@ class EmergencyClaimService {
         Map<String, dynamic> acceptancePayload = {
           'eventType': 'RESPONDER_ACCEPTANCE',
           'emergencyId': emergencyId,
-          'responderId': userId,
+          'responderId': responderId,
           'responderName': userName,
           'phoneNumber': phoneNumber,
           'bloodGroup': bloodGroup,
@@ -164,7 +181,8 @@ class EmergencyClaimService {
         };
 
         await OfflineNearbyService.processAcceptancePayload(acceptancePayload, _localDb);
-        await ImpactRewardService().recordEmergencyAccepted(userId, emergencyId);
+        await ImpactRewardService().recordEmergencyAccepted(responderId, emergencyId);
+        P2PDiagnostics.log(emergencyId, 'CLAIM_SUCCESSFUL_STANDALONE', {'role': role.name});
 
         return role;
       }

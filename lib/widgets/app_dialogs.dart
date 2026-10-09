@@ -195,7 +195,7 @@ class AppDialogs {
             : 'NEARBY EMERGENCY ALERT';
 
     final String subtitleText = isAmbulance
-        ? 'Priority dispatch to Ambulance #${vehicleNumber ?? '108'}'
+        ? 'Priority dispatch to Ambulance${vehicleNumber != null && vehicleNumber.isNotEmpty ? ' #$vehicleNumber' : ' Unit'}'
         : isPolice
             ? 'Priority dispatch to Patrol Unit #${vehicleNumber ?? 'PCR-12'}'
             : 'Someone nearby needs urgent assistance.';

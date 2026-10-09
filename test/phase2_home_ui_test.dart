@@ -43,7 +43,8 @@ void main() {
       expect(find.byIcon(Icons.notifications_outlined), findsNothing);
 
       // 2. Status / Existing Context
-      expect(find.textContaining('112'), findsWidgets);
+      expect(find.textContaining('Official primary'), findsWidgets);
+      expect(find.textContaining('112'), findsNothing);
       expect(find.textContaining('Citizen Responder'), findsOneWidget);
 
       // 3. Medium Live Map

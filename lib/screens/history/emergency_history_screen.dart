@@ -77,7 +77,7 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
       statusType = AppStatusType.emergency;
     } else if (upper == 'ASSIGNED' || upper == 'APPROACHING') {
       statusType = AppStatusType.warning;
-    } else if (upper == 'CANCELLED') {
+    } else if (upper == 'CANCELLED' || upper == 'CANCELED') {
       statusType = AppStatusType.normal;
     } else {
       statusType = AppStatusType.normal;
@@ -390,74 +390,67 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
           return const Center(child: CircularProgressIndicator(color: AppColors.brandBlue));
         }
 
-        var docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? []);
-        if (docs.isEmpty || snapshot.hasError) {
-          return FutureBuilder<List<EmergencyModel>>(
-            future: LocalDatabaseService().getAllLocalEmergencies(),
-            builder: (context, localSnapshot) {
-              var localList = EmergencyHistoryFilter.filterHelpAsked(
-                localSnapshot.data ?? [],
-                uid,
-              );
+        return FutureBuilder<List<EmergencyModel>>(
+          future: LocalDatabaseService().getAllLocalEmergencies(),
+          builder: (context, localSnapshot) {
+            Map<String, EmergencyModel> merged = {};
 
-              if (localList.isEmpty) {
-                return _buildEmptyState(
-                  icon: Icons.shield_outlined,
-                  title: 'No SOS requests yet',
-                  subtitle: 'Any emergency alerts you trigger will appear in this log.',
-                );
+            // 1. Add local records (including offline JS-OFF- alerts)
+            final localList = EmergencyHistoryFilter.filterHelpAsked(
+              localSnapshot.data ?? [],
+              uid,
+            );
+            for (var em in localList) {
+              merged[em.id] = em;
+            }
+
+            // 2. Merge Firestore documents
+            var docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? []);
+            for (var doc in docs) {
+              var data = doc.data() as Map<String, dynamic>;
+              var cloudEm = EmergencyModel.fromMap(data, doc.id);
+              if (merged.containsKey(doc.id)) {
+                var localEm = merged[doc.id]!;
+                // If local emergency is terminal and cloud is still SEARCHING, local terminal status is authoritative!
+                if (localEm.isTerminal && !cloudEm.isTerminal) {
+                  merged[doc.id] = localEm;
+                } else if (cloudEm.isTerminal && !localEm.isTerminal) {
+                  merged[doc.id] = cloudEm;
+                } else if (cloudEm.updatedAt.isAfter(localEm.updatedAt)) {
+                  merged[doc.id] = cloudEm;
+                }
+              } else {
+                merged[doc.id] = cloudEm;
               }
+            }
 
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: localList.length,
-                itemBuilder: (context, index) {
-                  var emergency = localList[index];
-                  return _buildEmergencyCard(
-                    context: context,
-                    id: emergency.id,
-                    type: emergency.type,
-                    status: emergency.status.name,
-                    latitude: emergency.latitude,
-                    longitude: emergency.longitude,
-                    createdAt: emergency.createdAt,
-                    isHelpAsked: true,
-                  );
-                },
+            var list = merged.values.toList();
+            list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+            if (list.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.shield_outlined,
+                title: 'No SOS requests yet',
+                subtitle: 'Any emergency alerts you trigger will appear in this log.',
               );
-            },
-          );
-        }
+            }
 
-        docs.sort((a, b) {
-          var aMap = a.data() as Map<String, dynamic>;
-          var bMap = b.data() as Map<String, dynamic>;
-          var aDate = EmergencyModel.parseDate(aMap['createdAt']);
-          var bDate = EmergencyModel.parseDate(bMap['createdAt']);
-          return bDate.compareTo(aDate);
-        });
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            var data = docs[index].data() as Map<String, dynamic>;
-            String docId = docs[index].id;
-            DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
-            String status = (data['status'] ?? 'COMPLETED').toString();
-            String type = (data['type'] ?? 'Medical').toString();
-            double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
-            double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-            return _buildEmergencyCard(
-              context: context,
-              id: docId,
-              type: type,
-              status: status,
-              latitude: lat,
-              longitude: lon,
-              createdAt: createdAt,
-              isHelpAsked: true,
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                var emergency = list[index];
+                return _buildEmergencyCard(
+                  context: context,
+                  id: emergency.id,
+                  type: emergency.type,
+                  status: emergency.status.name,
+                  latitude: emergency.latitude,
+                  longitude: emergency.longitude,
+                  createdAt: emergency.createdAt,
+                  isHelpAsked: true,
+                );
+              },
             );
           },
         );
@@ -508,96 +501,78 @@ class _EmergencyHistoryScreenState extends State<EmergencyHistoryScreen> with Si
           return const Center(child: CircularProgressIndicator(color: AppColors.brandBlue));
         }
 
-        var allDocs = snapshot.data?.docs ?? [];
-        var helpedDocs = allDocs.where((doc) {
-          var data = doc.data() as Map<String, dynamic>;
-          String victimId = data['victimId'] ?? '';
-          if (victimId == uid) return false;
+        return FutureBuilder<List<EmergencyModel>>(
+          future: LocalDatabaseService().getAllLocalEmergencies(),
+          builder: (context, localSnapshot) {
+            Map<String, EmergencyModel> merged = {};
 
-          String helperId = data['helperId'] ?? '';
-          Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
-          return helperId == uid || responders.containsKey(uid);
-        }).toList();
-
-        if (helpedDocs.isEmpty) {
-          return FutureBuilder<List<EmergencyModel>>(
-            future: LocalDatabaseService().getAllLocalEmergencies(),
-            builder: (context, localSnapshot) {
-              var localList = EmergencyHistoryFilter.filterVictimsHelped(
-                localSnapshot.data ?? [],
-                uid,
-              );
-
-              if (localList.isEmpty) {
-                return _buildEmptyState(
-                  icon: Icons.volunteer_activism_outlined,
-                  title: 'No rescues yet',
-                  subtitle: 'Emergencies where you respond and assist will appear here.',
-                );
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: localList.length,
-                itemBuilder: (context, index) {
-                  var emergency = localList[index];
-                  String? roleStr;
-                  if (emergency.responders.containsKey(uid)) {
-                    roleStr = emergency.responders[uid]!.role.name;
-                  }
-                  return _buildEmergencyCard(
-                    context: context,
-                    id: emergency.id,
-                    type: emergency.type,
-                    status: emergency.status.name,
-                    latitude: emergency.latitude,
-                    longitude: emergency.longitude,
-                    createdAt: emergency.createdAt,
-                    isHelpAsked: false,
-                    roleText: roleStr,
-                  );
-                },
-              );
-            },
-          );
-        }
-
-        helpedDocs.sort((a, b) {
-          var aMap = a.data() as Map<String, dynamic>;
-          var bMap = b.data() as Map<String, dynamic>;
-          var aDate = EmergencyModel.parseDate(aMap['createdAt']);
-          var bDate = EmergencyModel.parseDate(bMap['createdAt']);
-          return bDate.compareTo(aDate);
-        });
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: helpedDocs.length,
-          itemBuilder: (context, index) {
-            var data = helpedDocs[index].data() as Map<String, dynamic>;
-            String docId = helpedDocs[index].id;
-            DateTime createdAt = EmergencyModel.parseDate(data['createdAt']);
-            String status = (data['status'] ?? 'COMPLETED').toString();
-            String type = (data['type'] ?? 'Medical').toString();
-            double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
-            double lon = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-            Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
-            String? roleText;
-            if (responders.containsKey(uid)) {
-              roleText = (responders[uid] as Map<String, dynamic>)['role']?.toString();
+            // 1. Add local records (including offline JS-OFF- alerts)
+            final localList = EmergencyHistoryFilter.filterVictimsHelped(
+              localSnapshot.data ?? [],
+              uid,
+            );
+            for (var em in localList) {
+              merged[em.id] = em;
             }
 
-            return _buildEmergencyCard(
-              context: context,
-              id: docId,
-              type: type,
-              status: status,
-              latitude: lat,
-              longitude: lon,
-              createdAt: createdAt,
-              isHelpAsked: false,
-              roleText: roleText,
+            // 2. Merge Firestore documents
+            var allDocs = snapshot.data?.docs ?? [];
+            for (var doc in allDocs) {
+              var data = doc.data() as Map<String, dynamic>;
+              String victimId = data['victimId'] ?? '';
+              if (victimId == uid) continue;
+
+              String helperId = data['helperId'] ?? '';
+              Map<String, dynamic> responders = Map<String, dynamic>.from(data['responders'] ?? {});
+              if (helperId == uid || responders.containsKey(uid)) {
+                var cloudEm = EmergencyModel.fromMap(data, doc.id);
+                if (merged.containsKey(doc.id)) {
+                  var localEm = merged[doc.id]!;
+                  if (localEm.isTerminal && !cloudEm.isTerminal) {
+                    merged[doc.id] = localEm;
+                  } else if (cloudEm.isTerminal && !localEm.isTerminal) {
+                    merged[doc.id] = cloudEm;
+                  } else if (cloudEm.updatedAt.isAfter(localEm.updatedAt)) {
+                    merged[doc.id] = cloudEm;
+                  }
+                } else {
+                  merged[doc.id] = cloudEm;
+                }
+              }
+            }
+
+            var list = merged.values.toList();
+            list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+            if (list.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.volunteer_activism_outlined,
+                title: 'No rescues yet',
+                subtitle: 'Emergencies where you respond and assist will appear here.',
+              );
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                var emergency = list[index];
+                String? roleStr;
+                if (emergency.responders.containsKey(uid)) {
+                  roleStr = emergency.responders[uid]!.role.name;
+                }
+                return _buildEmergencyCard(
+                  context: context,
+                  id: emergency.id,
+                  type: emergency.type,
+                  status: emergency.status.name,
+                  latitude: emergency.latitude,
+                  longitude: emergency.longitude,
+                  createdAt: emergency.createdAt,
+                  isHelpAsked: false,
+                  roleText: roleStr,
+                );
+              },
             );
           },
         );

@@ -5,6 +5,8 @@ import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 import '../core/theme/app_shapes.dart';
 import 'common/app_feedback.dart';
+import '../services/auth_service.dart';
+import '../services/emergency_service.dart';
 
 class ResponderProfileCard extends StatelessWidget {
   final ResponderModel responder;
@@ -16,73 +18,105 @@ class ResponderProfileCard extends StatelessWidget {
     this.onCallPressed,
   });
 
-  void _handlePhoneCall(BuildContext context) {
-    String? phone = responder.phoneNumber;
-    if (phone == null || phone.trim().isEmpty) {
-      AppSnackbar.showWarning(
-        context,
-        'Phone number not available for this responder.',
-      );
-      return;
-    }
+  static bool _isCalling = false;
 
-    if (onCallPressed != null) {
-      onCallPressed!();
-      return;
-    }
+  void _handlePhoneCall(BuildContext context) async {
+    if (_isCalling) return;
+    _isCalling = true;
 
-    String cleanNumber = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    try {
+      if (onCallPressed != null) {
+        onCallPressed!();
+        return;
+      }
 
-    channel.invokeMethod('launch', {
-      'url': 'tel:$cleanNumber',
-      'useSafariVC': false,
-      'useWebView': false,
-      'enableJavaScript': false,
-      'enableDomStorage': false,
-      'universalLinksOnly': false,
-      'headers': {},
-    }).catchError((_) {
-      if (!context.mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
-          title: Row(
-            children: [
-              const Icon(Icons.phone_rounded, color: AppColors.brandBlue),
-              const SizedBox(width: 8),
-              Text(
-                responder.userName.isNotEmpty ? responder.userName : 'Responder Contact',
-                style: AppTypography.subheading,
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Responder Phone Number:', style: AppTypography.bodySecondary),
-              const SizedBox(height: 8),
-              SelectableText(
-                phone,
-                style: AppTypography.bodyMedium.copyWith(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.brandBlue,
+      String? phone = responder.phoneNumber;
+      if (phone == null || phone.trim().isEmpty) {
+        final profile = await AuthService().getUserProfile(responder.userId);
+        phone = profile?.phoneNumber;
+      }
+
+      if (phone == null || phone.trim().isEmpty) {
+        if (context.mounted) {
+          AppSnackbar.showWarning(
+            context,
+            'Phone number not available for this responder.',
+          );
+        }
+        return;
+      }
+
+      final cleanNumber = EmergencyContactsService.normalizeDialerNumber(phone);
+      if (cleanNumber.isEmpty) {
+        if (context.mounted) {
+          AppSnackbar.showWarning(
+            context,
+            'Responder phone number is invalid.',
+          );
+        }
+        return;
+      }
+
+      final launched = await EmergencyContactsService.launchDialer(cleanNumber);
+      if (!launched && context.mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+            title: Row(
+              children: [
+                const Icon(Icons.phone_rounded, color: AppColors.brandBlue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    responder.userName.isNotEmpty ? responder.userName : 'Responder Contact',
+                    style: AppTypography.subheading,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Could not open phone dialer automatically.', style: AppTypography.bodySecondary),
+                const SizedBox(height: 12),
+                const Text('Responder Phone Number:', style: AppTypography.caption),
+                const SizedBox(height: 4),
+                SelectableText(
+                  phone!,
+                  style: AppTypography.bodyMedium.copyWith(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.brandBlue,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton.icon(
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                label: const Text('COPY NUMBER'),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: phone!));
+                  if (ctx.mounted) {
+                    Navigator.of(ctx).pop();
+                    AppSnackbar.showSuccess(context, 'Phone number copied to clipboard.');
+                  }
+                },
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('CLOSE'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('CLOSE'),
-            ),
-          ],
-        ),
-      );
-    });
+        );
+      }
+    } finally {
+      _isCalling = false;
+    }
   }
 
   @override
@@ -98,7 +132,9 @@ class ResponderProfileCard extends StatelessWidget {
             : (isPrimary ? AppColors.emeraldGreen : AppColors.warningAmber);
 
     String roleLabel = isAmbulance
-        ? 'Ambulance #${responder.vehicleNumber ?? '108'}'
+        ? (responder.vehicleNumber != null && responder.vehicleNumber!.isNotEmpty
+            ? 'Ambulance #${responder.vehicleNumber}'
+            : 'Ambulance Unit')
         : isPolice
             ? 'Police Unit #${responder.vehicleNumber ?? 'PCR'}'
             : (isPrimary ? 'Primary Responder' : 'Standby Responder');

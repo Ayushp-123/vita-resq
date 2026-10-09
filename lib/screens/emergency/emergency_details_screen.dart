@@ -4,8 +4,10 @@ import '../../services/emergency_service.dart';
 import '../../services/emergency_claim_service.dart';
 import '../../services/local_database_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/hospital_service.dart';
 import '../../models/emergency_model.dart';
 import '../../models/responder_model.dart';
+import '../../models/hospital_model.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_shapes.dart';
@@ -16,6 +18,8 @@ import '../../widgets/app_dialogs.dart';
 import '../../widgets/common/app_status_badge.dart';
 import '../../widgets/map_widget.dart';
 import '../../core/navigation/app_navigator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../widgets/common/app_feedback.dart';
 
 class EmergencyDetailsScreen extends StatefulWidget {
   final String emergencyId;
@@ -35,12 +39,59 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
   final EmergencyService _emergencyService = EmergencyService();
   final EmergencyClaimService _claimService = EmergencyClaimService();
   final LocalDatabaseService _localDb = LocalDatabaseService();
+  IHospitalService get _hospitalService => HospitalService.instance;
+  List<HospitalModel> _nearbyHospitals = [];
+  String? _lastDiscoveredEmergencyId;
   bool _isClaiming = false;
 
   @override
   void initState() {
     super.initState();
     EmergencySoundService.stopSound();
+  }
+
+  void _discoverHospitalsIfNeeded(EmergencyModel emergency) {
+    if (_lastDiscoveredEmergencyId == emergency.id) return;
+    _lastDiscoveredEmergencyId = emergency.id;
+    _hospitalService
+        .discoverNearbyHospitals(
+          location: LatLng(emergency.latitude, emergency.longitude),
+          emergencyId: emergency.id,
+        )
+        .then((hospitals) {
+      if (mounted) setState(() => _nearbyHospitals = hospitals);
+    }).catchError((_) {});
+  }
+
+  void _checkVictimFallback(EmergencyModel emergency) async {
+    String? currentUid;
+    try {
+      currentUid = FirebaseAuth.instance.currentUser?.uid;
+    } catch (_) {
+      currentUid = null;
+    }
+    if (currentUid == null || !emergency.isVictim(currentUid) || emergency.isTerminal || emergency.status != EmergencyStatus.SEARCHING) {
+      return;
+    }
+    final alreadyDispatched = await EmergencyContactsService.hasDispatchedSmsFallback(emergency.id);
+    if (alreadyDispatched) return;
+
+    final elapsed = DateTime.now().difference(emergency.createdAt).inSeconds;
+    if (elapsed >= 180) {
+      await EmergencyContactsService.markSmsFallbackDispatched(emergency.id);
+      final contactsService = EmergencyContactsService();
+      bool sent = await contactsService.sendEmergencySMS(
+        latitude: emergency.latitude,
+        longitude: emergency.longitude,
+        type: emergency.type,
+      );
+      if (sent && mounted) {
+        AppSnackbar.showSuccess(
+          context,
+          '3-minute rule: Trusted-contact SMS ready to send.',
+        );
+      }
+    }
   }
 
   void _showConfirmationDialog() {
@@ -112,6 +163,11 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
 
     bool isCancelled = emergency.status == EmergencyStatus.CANCELLED;
     bool isCompleted = emergency.status == EmergencyStatus.COMPLETED;
+
+    if (!isCancelled && !isCompleted) {
+      _discoverHospitalsIfNeeded(emergency);
+      _checkVictimFallback(emergency);
+    }
 
     return Scaffold(
       backgroundColor: AppColors.warmOffWhite,
@@ -373,6 +429,88 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
                         ),
                       ),
                     ],
+
+                    // SECTION: NEARBY HOSPITALS (STANDBY)
+                    if (!isCancelled && !isCompleted) ...[
+                      AppSpacing.gapVerticalLg,
+                      Text(
+                        'NEARBY HOSPITALS (STANDBY)',
+                        style: AppTypography.caption.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfacePureWhite,
+                          borderRadius: AppShapes.card,
+                          border: Border.all(color: AppColors.borderSubtle),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.local_hospital_outlined, size: 18, color: AppColors.brandBlue),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Medical centers prepared for transport',
+                                    style: AppTypography.bodyMedium.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13.5,
+                                      color: AppColors.deepNavy,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Prepared in background for post-arrival victim transfer. Primary objective is reaching the victim.',
+                              style: AppTypography.caption.copyWith(
+                                color: AppColors.textSecondary,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                            if (_nearbyHospitals.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              ..._nearbyHospitals.take(2).map((h) => Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2.5),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            h.name,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppColors.deepNavy,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Text(
+                                          h.formattedDistance,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.brandBlue,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -490,20 +628,18 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.initialEmergency != null) {
-      return _buildDetailsContent(widget.initialEmergency!);
-    }
-
     bool isOffline = widget.emergencyId.startsWith('JS-OFF-');
 
     if (isOffline) {
       return StreamBuilder<EmergencyModel?>(
+        initialData: widget.initialEmergency,
         stream: _localDb.streamEmergency(widget.emergencyId),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          final emergency = snapshot.data ?? widget.initialEmergency;
+          if (snapshot.connectionState == ConnectionState.waiting && emergency == null) {
             return const Scaffold(body: AppLoadingWidget());
           }
-          if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+          if (emergency == null) {
             return Scaffold(
               appBar: AppBar(title: const Text('Offline Emergency')),
               body: AppErrorWidget(
@@ -515,18 +651,27 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
               ),
             );
           }
-          return _buildDetailsContent(snapshot.data!);
+          return _buildDetailsContent(emergency);
         },
       );
     }
 
+    Stream<EmergencyModel> emergencyStream;
+    try {
+      emergencyStream = _emergencyService.streamEmergency(widget.emergencyId);
+    } catch (e) {
+      emergencyStream = Stream.error(e);
+    }
+
     return StreamBuilder<EmergencyModel>(
-      stream: _emergencyService.streamEmergency(widget.emergencyId),
+      initialData: widget.initialEmergency,
+      stream: emergencyStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+        final emergency = snapshot.data ?? widget.initialEmergency;
+        if (snapshot.connectionState == ConnectionState.waiting && emergency == null) {
           return const Scaffold(body: AppLoadingWidget());
         }
-        if (snapshot.hasError || !snapshot.hasData) {
+        if (emergency == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Emergency Details')),
             body: AppErrorWidget(
@@ -536,7 +681,7 @@ class _EmergencyDetailsScreenState extends State<EmergencyDetailsScreen> {
             ),
           );
         }
-        return _buildDetailsContent(snapshot.data!);
+        return _buildDetailsContent(emergency);
       },
     );
   }

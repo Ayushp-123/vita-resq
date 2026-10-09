@@ -4,9 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../core/constants/app_constants.dart';
 import '../models/emergency_model.dart';
 import '../screens/emergency/emergency_details_screen.dart';
+import 'responder_mode_service.dart';
 
 /// Centralized presentation copy for emergency push and in-app alert feedback (Phase 8).
 class EmergencyAlertPresentation {
@@ -57,6 +59,14 @@ class EmergencyAlertPresentation {
 
 class NotificationService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  static const MethodChannel _platformChannel = MethodChannel('com.example.jan_sarthi/notifications');
+
+  /// Cold-start pending emergency ID waiting for navigatorKey to be mounted
+  static String? pendingEmergencyId;
+
+  /// Deduplication set to prevent repeated alerts for the same incident
+  static final Set<String> _processedEmergencyNotifications = <String>{};
+
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
 
   StreamSubscription<String>? _tokenRefreshSubscription;
@@ -64,10 +74,18 @@ class NotificationService {
   StreamSubscription<RemoteMessage>? _messageOpenedAppSubscription;
   bool _isInitialized = false;
 
+  /// Clear deduplication cache (strictly for testing)
+  @visibleForTesting
+  static void resetProcessedNotifications() {
+    _processedEmergencyNotifications.clear();
+    pendingEmergencyId = null;
+  }
+
   Future<void> init() async {
     if (_isInitialized) return;
     _isInitialized = true;
 
+    // 1. Request runtime notification permissions
     try {
       await _fcm.requestPermission(
         alert: true,
@@ -77,25 +95,52 @@ class NotificationService {
       );
     } catch (_) {}
 
-    // Check cold-start / initial message when app opened from terminated state
     try {
-      RemoteMessage? initialMessage = await _fcm.getInitialMessage();
-      if (initialMessage != null) {
-        _handleMessage(initialMessage);
+      final status = await Permission.notification.status;
+      if (!status.isGranted && !status.isPermanentlyDenied) {
+        await Permission.notification.request();
       }
     } catch (_) {}
 
-    // Foreground message handler
+    // 2. Set up native method channel handler for notification taps & service events
+    _platformChannel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'onNotificationTapped') {
+        final emergencyId = call.arguments?.toString();
+        if (emergencyId != null && emergencyId.isNotEmpty) {
+          navigateToEmergency(emergencyId);
+        }
+      } else if (call.method == 'onResponderModeTimedOut') {
+        await ResponderModeService.instance.stopResponderMode(fromTimeout: true);
+      }
+    });
+
+    // 3. Check cold-start / initial emergency ID from native intent
+    try {
+      final initialNativeId = await _platformChannel.invokeMethod<String>('getInitialEmergencyId');
+      if (initialNativeId != null && initialNativeId.isNotEmpty) {
+        navigateToEmergency(initialNativeId);
+      }
+    } catch (_) {}
+
+    // 4. Check cold-start FCM initial message
+    try {
+      RemoteMessage? initialMessage = await _fcm.getInitialMessage();
+      if (initialMessage != null) {
+        _handleFcmMessage(initialMessage, isTap: true);
+      }
+    } catch (_) {}
+
+    // 5. Foreground FCM message listener
     _messageSubscription = FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      _handleMessage(message);
+      _handleFcmMessage(message, isTap: false);
     });
 
-    // Tap notification when app is in background/opened
+    // 6. Background FCM message opened listener
     _messageOpenedAppSubscription = FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      _handleMessage(message);
+      _handleFcmMessage(message, isTap: true);
     });
 
-    // Register FCM token for active user and listen for refresh
+    // 7. Register FCM token for active user and listen for refresh
     await registerToken();
   }
 
@@ -132,15 +177,105 @@ class NotificationService {
     } catch (_) {}
   }
 
-  void _handleMessage(RemoteMessage message) {
-    if (message.data.containsKey('emergencyId')) {
-      String emergencyId = message.data['emergencyId'];
-      navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (_) => EmergencyDetailsScreen(emergencyId: emergencyId),
-        ),
+  void _handleFcmMessage(RemoteMessage message, {required bool isTap}) {
+    final emergencyId = message.data['emergencyId']?.toString();
+    if (emergencyId == null || emergencyId.isEmpty) return;
+
+    if (isTap) {
+      navigateToEmergency(emergencyId);
+    } else {
+      // In foreground, trigger high-importance alert notification if not already processed
+      final distanceStr = message.data['distanceMeters']?.toString();
+      final double? dist = distanceStr != null ? double.tryParse(distanceStr) : null;
+      final type = message.data['type']?.toString() ?? 'EMERGENCY';
+
+      showEmergencyAlertNotification(
+        emergencyId: emergencyId,
+        type: type,
+        distanceMeters: dist,
+        isOffline: false,
       );
     }
+  }
+
+  /// Centralized responder notification display (used by both Online and Offline P2P paths)
+  static Future<void> showEmergencyAlertNotification({
+    required String emergencyId,
+    required String type,
+    double? distanceMeters,
+    bool isOffline = false,
+    String userRole = 'CITIZEN',
+    EmergencyStatus? status,
+  }) async {
+    if (emergencyId.isEmpty) return;
+
+    // Reject closed, cancelled or already notified emergencies
+    if (status == EmergencyStatus.COMPLETED || status == EmergencyStatus.CANCELLED) {
+      return;
+    }
+    if (_processedEmergencyNotifications.contains(emergencyId)) {
+      return;
+    }
+    _processedEmergencyNotifications.add(emergencyId);
+
+    final title = isOffline
+        ? 'Vita ResQ — Emergency Nearby (Offline P2P)'
+        : 'Vita ResQ — Emergency Nearby';
+
+    String distStr = '';
+    if (distanceMeters != null && distanceMeters > 0) {
+      distStr = distanceMeters < 1000
+          ? ' • ${distanceMeters.round()} m away'
+          : ' • ${(distanceMeters / 1000).toStringAsFixed(1)} km away';
+    }
+    final body = 'A nearby Vita ResQ user needs assistance ($type)$distStr';
+    final int notificationId = emergencyId.hashCode & 0x7FFFFFFF;
+
+    try {
+      await _platformChannel.invokeMethod('showEmergencyNotification', {
+        'id': notificationId,
+        'title': title,
+        'body': body,
+        'emergencyId': emergencyId,
+      });
+    } catch (_) {}
+
+    try {
+      await EmergencySoundService.playEmergencyAlert(
+        userRole: userRole,
+        emergencyId: emergencyId,
+      );
+    } catch (_) {}
+  }
+
+  /// Cancel active notification when emergency is resolved, claimed, or cancelled
+  static Future<void> cancelEmergencyNotification(String emergencyId) async {
+    if (emergencyId.isEmpty) return;
+    final int notificationId = emergencyId.hashCode & 0x7FFFFFFF;
+    try {
+      await _platformChannel.invokeMethod('cancelEmergencyNotification', {
+        'id': notificationId,
+      });
+    } catch (_) {}
+  }
+
+  /// Authoritative navigation router for notification taps (foreground, background, cold-start)
+  static bool navigateToEmergency(String emergencyId) {
+    if (emergencyId.isEmpty) return false;
+
+    final nav = navigatorKey.currentState;
+    if (nav == null) {
+      pendingEmergencyId = emergencyId;
+      return false;
+    }
+
+    pendingEmergencyId = null;
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => EmergencyDetailsScreen(emergencyId: emergencyId),
+      ),
+    );
+    return true;
   }
 
   void dispose() {
@@ -212,7 +347,7 @@ class EmergencySoundService {
     _isPlaying = true;
 
     if (userRole == 'AMBULANCE_DRIVER') {
-      // 108 Ambulance Siren Alert (Repeating Alert Tone + Rapid Haptic)
+      // Ambulance Siren Alert (Repeating Alert Tone + Rapid Haptic)
       _startSirenLoop(intervalMs: 800);
     } else if (userRole == 'POLICE_PCR') {
       // Police Tactical Siren Alert

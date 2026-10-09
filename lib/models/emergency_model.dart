@@ -13,6 +13,7 @@ enum EmergencyStatus {
 class EmergencyModel {
   final String id;
   final String victimId;
+  final String? originDeviceId; // Local installation/device ID that generated this emergency
   final String type;
   final double latitude;
   final double longitude;
@@ -29,6 +30,7 @@ class EmergencyModel {
   EmergencyModel({
     required this.id,
     required this.victimId,
+    this.originDeviceId,
     this.type = 'MEDICAL',
     required this.latitude,
     required this.longitude,
@@ -64,6 +66,9 @@ class EmergencyModel {
           status == EmergencyStatus.APPROACHING);
 
   bool isVictim(String uid) => victimId == uid;
+
+  bool isOriginDevice(String deviceId) =>
+      originDeviceId != null && originDeviceId == deviceId;
 
   bool isPrimaryResponder(String uid) {
     if (helperId == uid) return true;
@@ -124,6 +129,7 @@ class EmergencyModel {
     return EmergencyModel(
       id: id,
       victimId: map['victimId'] ?? '',
+      originDeviceId: map['originDeviceId']?.toString(),
       type: map['type'] ?? 'MEDICAL',
       latitude: (map['latitude'] as num?)?.toDouble() ?? 0.0,
       longitude: (map['longitude'] as num?)?.toDouble() ?? 0.0,
@@ -152,6 +158,7 @@ class EmergencyModel {
     return {
       'id': id,
       'victimId': victimId,
+      if (originDeviceId != null) 'originDeviceId': originDeviceId,
       'type': type,
       'latitude': latitude,
       'longitude': longitude,

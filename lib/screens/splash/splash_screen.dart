@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/navigation/app_navigator.dart';
+import '../../services/notification_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -37,6 +38,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     if (!mounted) return;
 
     try {
+      final pendingId = NotificationService.pendingEmergencyId;
+      if (pendingId != null && pendingId.isNotEmpty) {
+        NotificationService.pendingEmergencyId = null;
+        AppNavigator.navigateToEmergencyDetails(context, pendingId);
+        return;
+      }
+
       User? user = FirebaseAuth.instance.currentUser;
       if (user != null || kIsWeb) {
         AppNavigator.navigateToHome(context);
@@ -160,7 +168,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Connecting nearby help • For life threats call 112',
+                  'Connecting nearby help • Official services primary',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w400,

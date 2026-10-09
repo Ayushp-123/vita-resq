@@ -5,11 +5,12 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../widgets/common/app_feedback.dart';
 import '../../widgets/app_dialogs.dart';
+import '../../core/theme/app_shapes.dart';
 
 /// Dedicated Emergency Contacts Screen (Phase 11 Information Architecture).
 ///
 /// Manages up to 3 trusted emergency contacts for automated SMS dispatch
-/// and fallback escalation when nearby responders do not connect within 60s.
+/// and fallback escalation when nearby responders do not connect within 180s (3 minutes).
 class EmergencyContactsScreen extends StatefulWidget {
   final List<EmergencyContact>? initialContacts;
 
@@ -100,14 +101,14 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Phone Number',
                           hintText: 'e.g. 9876543210 or +91 9876543210',
-                          helperText: 'Auto-formatted with +91 for direct SMS',
+                          helperText: 'Include country code (e.g. +91 9876543210 or 10-digit number)',
                           prefixIcon: Icon(Icons.phone_outlined),
                         ),
                         validator: (val) {
                           if (val == null || val.trim().isEmpty) return 'Phone required';
-                          String digits = val.replaceAll(RegExp(r'[^0-9]'), '');
-                          if (digits.length < 10) {
-                            return 'Enter at least 10-digit mobile number';
+                          String digits = val.replaceAll(RegExp(r'\D'), '');
+                          if (digits.length < 7 || digits.length > 15) {
+                            return 'Enter a valid 7 to 15-digit mobile number';
                           }
                           return null;
                         },
@@ -233,6 +234,84 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     }
   }
 
+  void _testSendWhatsApp() async {
+    if (_emergencyContacts.isEmpty) {
+      AppSnackbar.showWarning(context, 'Please add at least 1 emergency contact first.');
+      return;
+    }
+
+    final pos = await _locationService.getCurrentLocation();
+    double lat = pos?.latitude ?? 21.2253;
+    double lon = pos?.longitude ?? 81.3107;
+
+    bool sent = await _contactsService.sendEmergencyWhatsApp(
+      latitude: lat,
+      longitude: lon,
+      type: 'TEST EMERGENCY',
+    );
+
+    if (mounted) {
+      if (sent) {
+        AppSnackbar.showSuccess(
+          context,
+          'Opening WhatsApp with emergency coordinates…',
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: const RoundedRectangleBorder(borderRadius: AppShapes.dialog),
+            title: const Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: AppColors.emergencyRed),
+                SizedBox(width: 8),
+                Text('WhatsApp Unavailable', style: AppTypography.subheading),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Could not open WhatsApp for this contact. Ensure WhatsApp is installed on this device and the contact has an active WhatsApp account.',
+                  style: AppTypography.bodySecondary,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'You can test SMS dispatch instead to verify emergency delivery to this contact.',
+                  style: AppTypography.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Note: Standard carrier SMS rates may apply depending on your mobile plan.',
+                  style: AppTypography.caption.copyWith(color: AppColors.textMuted),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('CLOSE'),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandBlue,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.sms_rounded, size: 16),
+                label: const Text('TEST SMS INSTEAD'),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  _testSendSMS();
+                },
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -312,7 +391,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'If no nearby responders connect within 60s during an active SOS, Vita ResQ dispatches direct SMS alerts containing your live coordinates to these trusted contacts.',
+                                  'If no nearby responders connect within 180s (3 minutes) during an active SOS, Vita ResQ prepares SMS alerts containing your live coordinates to these trusted contacts.',
                                   style: AppTypography.bodySecondary.copyWith(fontSize: 12, height: 1.4),
                                 ),
                               ],
@@ -503,6 +582,21 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         onPressed: _testSendSMS,
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 48),
+                          foregroundColor: const Color(0xFF25D366),
+                          side: const BorderSide(color: Color(0xFF25D366)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                        label: const Text(
+                          'Test Emergency WhatsApp Alert',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        onPressed: _testSendWhatsApp,
                       ),
                     ],
                   ],

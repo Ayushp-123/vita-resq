@@ -260,7 +260,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             DropdownMenuItem(
                               value: 'AMBULANCE_DRIVER',
-                              child: Text('🚑 108 Ambulance Driver'),
+                              child: Text('🚑 Ambulance Driver'),
                             ),
                             DropdownMenuItem(
                               value: 'POLICE_PCR',
@@ -284,7 +284,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             controller: _vehicleNumberController,
                             textCapitalization: TextCapitalization.characters,
                             decoration: InputDecoration(
-                              hintText: _selectedRole == 'AMBULANCE_DRIVER' ? 'e.g. DL-04-108' : 'e.g. PCR-12',
+                              hintText: _selectedRole == 'AMBULANCE_DRIVER' ? 'e.g. DL-04-AMB' : 'e.g. PCR-12',
                               prefixIcon: Icon(
                                 _selectedRole == 'AMBULANCE_DRIVER' ? Icons.local_hospital : Icons.local_police,
                                 color: AppTheme.primaryRed,

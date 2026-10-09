@@ -119,7 +119,8 @@ void main() {
       expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
 
       // 2. Status / Context
-      expect(find.textContaining('112'), findsWidgets);
+      expect(find.textContaining('Official primary'), findsWidgets);
+      expect(find.textContaining('112'), findsNothing);
 
       // 3. Map with humanized GPS badge
       expect(find.text('GPS Active'), findsWidgets);

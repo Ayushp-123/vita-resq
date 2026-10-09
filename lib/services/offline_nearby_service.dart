@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:geolocator/geolocator.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/emergency_model.dart';
 import '../models/responder_model.dart';
 import 'local_database_service.dart';
+import 'p2p_diagnostics.dart';
 import 'p2p_payload_integrity.dart';
 
 class ClaimProcessResult {
@@ -34,6 +36,16 @@ class OfflineNearbyService {
   final Set<String> _connectedEndpoints = {};
   Function(Map<String, dynamic>)? onSOSReceivedCallback;
 
+  bool _isAdvertising = false;
+  bool _isDiscovering = false;
+  int _discoverySubscribers = 0;
+  final StreamController<Map<String, dynamic>> _sosDiscoveredController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  Stream<Map<String, dynamic>> get sosDiscoveredStream => _sosDiscoveredController.stream;
+  bool get isAdvertising => _isAdvertising;
+  bool get isDiscovering => _isDiscovering;
+
   final StreamController<Map<String, dynamic>> _claimAckController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -55,18 +67,49 @@ class OfflineNearbyService {
     _claimAckController.add(ack);
   }
 
+  void triggerSOSDiscoveredForTesting(Map<String, dynamic> sosData) {
+    onSOSReceivedCallback?.call(sosData);
+  }
+
   /// Request permissions for Offline P2P (Bluetooth, Location, Nearby Devices)
   Future<bool> checkOfflinePermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.location,
-      Permission.bluetooth,
-      Permission.bluetoothAdvertise,
-      Permission.bluetoothConnect,
-      Permission.bluetoothScan,
-      Permission.nearbyWifiDevices,
-    ].request();
+    bool isGpsEnabled = false;
+    try {
+      isGpsEnabled = await Geolocator.isLocationServiceEnabled();
+    } catch (e) {
+      // Graceful fallback for mock/test environments
+      isGpsEnabled = true;
+    }
 
-    return statuses.values.every((status) => status.isGranted || status.isLimited);
+    if (!isGpsEnabled) {
+      P2PDiagnostics.log('PERM', 'GPS_DISABLED', {'status': 'DISABLED'});
+    }
+
+    Map<Permission, PermissionStatus> statuses = {};
+    try {
+      statuses = await [
+        Permission.location,
+        Permission.bluetooth,
+        Permission.bluetoothAdvertise,
+        Permission.bluetoothConnect,
+        Permission.bluetoothScan,
+        Permission.nearbyWifiDevices,
+      ].request();
+    } catch (e) {
+      P2PDiagnostics.log('PERM', 'PERMISSION_REQUEST_EXCEPTION', {'error': e.toString()});
+      return isGpsEnabled;
+    }
+
+    bool allGranted = statuses.values.every((status) => status.isGranted || status.isLimited);
+    if (!allGranted) {
+      final denied = statuses.entries
+          .where((e) => !e.value.isGranted && !e.value.isLimited)
+          .map((e) => e.key.toString())
+          .join(', ');
+      P2PDiagnostics.log('PERM', 'PERMISSIONS_DENIED', {'denied': denied});
+    }
+
+    return allGranted && isGpsEnabled;
   }
 
   /// Start P2P advertising (Victim broadcasting SOS to multiple nearby peers)
@@ -75,14 +118,26 @@ class OfflineNearbyService {
     required double latitude,
     required double longitude,
     required String victimId,
+    String? originDeviceId,
   }) async {
-    await checkOfflinePermissions();
+    originDeviceId ??= await LocalDatabaseService.getOrCreateLocalDeviceId();
+    P2PDiagnostics.log(emergencyId, 'ADVERTISING_START', {
+      'role': 'VICTIM',
+      'originDeviceId': originDeviceId,
+    });
+
+    final permOk = await checkOfflinePermissions();
+    if (!permOk) {
+      P2PDiagnostics.log(emergencyId, 'ADVERTISING_WARNING', {'reason': 'PERMISSIONS_OR_GPS_MISSING'});
+    }
+
     String userName = "JanSarthi_Victim_$victimId";
 
     Map<String, dynamic> payloadMap = {
       'eventType': 'SOS_BROADCAST',
       'emergencyId': emergencyId,
       'victimId': victimId,
+      'originDeviceId': originDeviceId,
       'latitude': latitude,
       'longitude': longitude,
       'type': 'MEDICAL',
@@ -92,6 +147,13 @@ class OfflineNearbyService {
     payloadMap = P2PPayloadIntegrity.signPayload(payloadMap);
     String payloadJson = jsonEncode(payloadMap);
 
+    if (_isAdvertising) {
+      try {
+        await Nearby().stopAdvertising();
+      } catch (_) {}
+      _isAdvertising = false;
+    }
+
     try {
       await Nearby().startAdvertising(
         userName,
@@ -99,6 +161,7 @@ class OfflineNearbyService {
         onConnectionInitiated: (String id, ConnectionInfo info) async {
           _connectedPeers[id] = info;
           _connectedEndpoints.add(id);
+          P2PDiagnostics.log(emergencyId, 'CONNECTION_INITIATED', {'endpointId': id});
           await Nearby().acceptConnection(
             id,
             onPayLoadRecieved: (String endpointId, Payload payload) async {
@@ -106,17 +169,29 @@ class OfflineNearbyService {
                 try {
                   final verifiedData = P2PPayloadIntegrity.parseAndVerifyBytes(payload.bytes!);
                   if (verifiedData != null) {
+                    final emId = verifiedData['emergencyId'] ?? emergencyId;
+                    P2PDiagnostics.log(emId, 'INTEGRITY_CHECK', {'result': 'PASSED'});
+                    P2PDiagnostics.log(emId, 'PAYLOAD_RECEIVED', {
+                      'bytes': payload.bytes!.length,
+                      'eventType': verifiedData['eventType'],
+                    });
                     await handleIncomingPayload(verifiedData);
+                    _sosDiscoveredController.add(verifiedData);
                     if (onSOSReceivedCallback != null) {
                       onSOSReceivedCallback!(verifiedData);
                     }
+                  } else {
+                    P2PDiagnostics.log(emergencyId, 'INTEGRITY_CHECK', {'result': 'FAILED'});
                   }
-                } catch (_) {}
+                } catch (e) {
+                  P2PDiagnostics.log(emergencyId, 'PAYLOAD_PARSE_ERROR', {'error': e.toString()});
+                }
               }
             },
           );
         },
         onConnectionResult: (String id, Status status) async {
+          P2PDiagnostics.log(emergencyId, 'CONNECTION_RESULT', {'endpointId': id, 'status': status.name});
           if (status == Status.CONNECTED) {
             _connectedEndpoints.add(id);
             try {
@@ -124,18 +199,25 @@ class OfflineNearbyService {
                 id,
                 Uint8List.fromList(utf8.encode(payloadJson)),
               );
-            } catch (_) {}
+              P2PDiagnostics.log(emergencyId, 'PAYLOAD_SENT', {'bytes': payloadJson.length, 'endpointId': id});
+            } catch (e) {
+              P2PDiagnostics.log(emergencyId, 'PAYLOAD_SEND_ERROR', {'endpointId': id, 'error': e.toString()});
+            }
           } else {
             _connectedEndpoints.remove(id);
           }
         },
         onDisconnected: (String id) {
+          P2PDiagnostics.log(emergencyId, 'ENDPOINT_DISCONNECTED', {'endpointId': id});
           _connectedPeers.remove(id);
           _connectedEndpoints.remove(id);
         },
       );
+      _isAdvertising = true;
+      P2PDiagnostics.log(emergencyId, 'ADVERTISING_STARTED', {'status': 'SUCCESS'});
     } catch (e) {
-      // Offline advertising exception handling
+      _isAdvertising = false;
+      P2PDiagnostics.log(emergencyId, 'ADVERTISING_FAILED', {'error': e.toString()});
     }
   }
 
@@ -144,19 +226,36 @@ class OfflineNearbyService {
     required String currentUserId,
     required Function(Map<String, dynamic>) onSOSDiscovered,
   }) async {
+    _discoverySubscribers++;
     onSOSReceivedCallback = onSOSDiscovered;
-    await checkOfflinePermissions();
+
+    P2PDiagnostics.log('NONE', 'DISCOVERY_REQUESTED', {
+      'role': 'RESPONDER',
+      'subscribers': _discoverySubscribers,
+      'isDiscovering': _isDiscovering,
+    });
+
+    if (_isDiscovering) {
+      return;
+    }
+
+    final permOk = await checkOfflinePermissions();
+    if (!permOk) {
+      P2PDiagnostics.log('NONE', 'DISCOVERY_WARNING', {'reason': 'PERMISSIONS_OR_GPS_MISSING'});
+    }
 
     try {
       await Nearby().startDiscovery(
         "JanSarthi_Helper_$currentUserId",
         strategy,
         onEndpointFound: (String id, String userName, String serviceId) async {
+          P2PDiagnostics.log('NONE', 'ENDPOINT_FOUND', {'endpointId': id, 'serviceId': serviceId});
           await Nearby().requestConnection(
             "JanSarthi_Helper_$currentUserId",
             id,
             onConnectionInitiated: (String endpointId, ConnectionInfo info) async {
               _connectedEndpoints.add(endpointId);
+              P2PDiagnostics.log('NONE', 'CONNECTION_INITIATED', {'endpointId': endpointId});
               await Nearby().acceptConnection(
                 endpointId,
                 onPayLoadRecieved: (String epId, Payload payload) async {
@@ -164,20 +263,35 @@ class OfflineNearbyService {
                     try {
                       final verifiedData = P2PPayloadIntegrity.parseAndVerifyBytes(payload.bytes!);
                       if (verifiedData != null) {
+                        final emId = verifiedData['emergencyId'] ?? 'NONE';
+                        P2PDiagnostics.log(emId, 'INTEGRITY_CHECK', {'result': 'PASSED'});
+                        P2PDiagnostics.log(emId, 'PAYLOAD_RECEIVED', {
+                          'bytes': payload.bytes!.length,
+                          'eventType': verifiedData['eventType'],
+                        });
                         await handleIncomingPayload(verifiedData);
+                        _sosDiscoveredController.add(verifiedData);
                         if (verifiedData['eventType'] != 'CLAIM_REQUEST' &&
                             verifiedData['eventType'] != 'CLAIM_ACK' &&
                             verifiedData['eventType'] != 'RESPONDER_ACCEPTANCE' &&
                             verifiedData['eventType'] != 'STATUS_UPDATE') {
                           onSOSDiscovered(verifiedData);
+                          if (onSOSReceivedCallback != null && onSOSReceivedCallback != onSOSDiscovered) {
+                            onSOSReceivedCallback!(verifiedData);
+                          }
                         }
+                      } else {
+                        P2PDiagnostics.log('NONE', 'INTEGRITY_CHECK', {'result': 'FAILED'});
                       }
-                    } catch (_) {}
+                    } catch (e) {
+                      P2PDiagnostics.log('NONE', 'PAYLOAD_PARSE_ERROR', {'error': e.toString()});
+                    }
                   }
                 },
               );
             },
             onConnectionResult: (String endpointId, Status status) {
+              P2PDiagnostics.log('NONE', 'CONNECTION_RESULT', {'endpointId': endpointId, 'status': status.name});
               if (status == Status.CONNECTED) {
                 _connectedEndpoints.add(endpointId);
               } else {
@@ -185,16 +299,45 @@ class OfflineNearbyService {
               }
             },
             onDisconnected: (String endpointId) {
+              P2PDiagnostics.log('NONE', 'ENDPOINT_DISCONNECTED', {'endpointId': endpointId});
               _connectedEndpoints.remove(endpointId);
             },
           );
         },
         onEndpointLost: (String? id) {
+          P2PDiagnostics.log('NONE', 'ENDPOINT_LOST', {'endpointId': id ?? 'null'});
           if (id != null) _connectedEndpoints.remove(id);
         },
       );
+      _isDiscovering = true;
+      P2PDiagnostics.log('NONE', 'DISCOVERY_STARTED', {'status': 'SUCCESS'});
     } catch (e) {
-      // Discovery exception handling
+      if (e.toString().contains('8002') || e.toString().contains('STATUS_ALREADY_DISCOVERING')) {
+        _isDiscovering = true;
+        P2PDiagnostics.log('NONE', 'DISCOVERY_ALREADY_ACTIVE', {'status': 'ACTIVE'});
+      } else {
+        _isDiscovering = false;
+        P2PDiagnostics.log('NONE', 'DISCOVERY_FAILED', {'error': e.toString()});
+      }
+    }
+  }
+
+  /// Decrement discovery subscriber count and stop discovery only if no subscribers remain
+  Future<void> stopSOSDiscovery() async {
+    if (_discoverySubscribers > 0) {
+      _discoverySubscribers--;
+    }
+    P2PDiagnostics.log('NONE', 'DISCOVERY_RELEASED', {
+      'remainingSubscribers': _discoverySubscribers,
+      'isDiscovering': _isDiscovering,
+    });
+
+    if (_discoverySubscribers == 0 && _isDiscovering) {
+      try {
+        await Nearby().stopDiscovery();
+      } catch (_) {}
+      _isDiscovering = false;
+      P2PDiagnostics.log('NONE', 'DISCOVERY_STOPPED', {'status': 'STOPPED'});
     }
   }
 
@@ -254,6 +397,7 @@ class OfflineNearbyService {
     required String emergencyId,
     required String responderId,
     required String responderName,
+    String? originDeviceId,
     String? phoneNumber,
     String? bloodGroup,
     String? userRole,
@@ -261,12 +405,14 @@ class OfflineNearbyService {
     required double latitude,
     required double longitude,
   }) async {
+    originDeviceId ??= await LocalDatabaseService.getOrCreateLocalDeviceId();
     Map<String, dynamic> payloadMap = {
       'eventType': 'CLAIM_REQUEST',
       'requestId': requestId,
       'emergencyId': emergencyId,
       'responderId': responderId,
       'responderName': responderName,
+      'originDeviceId': originDeviceId,
       'phoneNumber': phoneNumber,
       'bloodGroup': bloodGroup,
       'userRole': userRole,
@@ -276,11 +422,23 @@ class OfflineNearbyService {
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
+    P2PDiagnostics.log(emergencyId, 'CLAIM_REQUEST_SENT', {
+      'requestId': requestId,
+      'responderId': responderId,
+      'originDeviceId': originDeviceId,
+    });
+
     return _broadcastJson(payloadMap);
   }
 
   /// Transmit a CLAIM_ACK payload over P2P Nearby Connections back to the requester
   Future<bool> sendClaimAck(Map<String, dynamic> ackPayload) async {
+    final emId = ackPayload['emergencyId'] ?? 'NONE';
+    P2PDiagnostics.log(emId, 'CLAIM_ACK_SENT', {
+      'accepted': ackPayload['accepted'],
+      'role': ackPayload['role'],
+      'reason': ackPayload['reason'],
+    });
     return _broadcastJson(ackPayload);
   }
 
@@ -372,7 +530,15 @@ class OfflineNearbyService {
     }
 
     // Authoritative check: Victim cannot volunteer for their own emergency
-    if (existingEmergency.victimId == responderId) {
+    final isSameOrigin = existingEmergency.originDeviceId != null &&
+        data['originDeviceId'] != null &&
+        existingEmergency.originDeviceId == data['originDeviceId'];
+    final isSameAuthVictim = responderId != 'offline_user' &&
+        existingEmergency.victimId.isNotEmpty &&
+        existingEmergency.victimId != 'offline_user' &&
+        existingEmergency.victimId == responderId;
+
+    if (isSameOrigin || isSameAuthVictim) {
       Map<String, dynamic> failAck = {
         'eventType': 'CLAIM_ACK',
         'requestId': requestId,
@@ -382,6 +548,10 @@ class OfflineNearbyService {
         'reason': 'VICTIM_CANNOT_RESPOND',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
+      P2PDiagnostics.log(emergencyId, 'CLAIM_ACK_REJECTED', {
+        'reason': 'VICTIM_CANNOT_RESPOND',
+        'isSameOrigin': isSameOrigin,
+      });
       return ClaimProcessResult(accepted: false, reason: 'VICTIM_CANNOT_RESPOND', ackPayload: failAck);
     }
 
@@ -456,6 +626,7 @@ class OfflineNearbyService {
     EmergencyModel updatedEmergency = EmergencyModel(
       id: existingEmergency.id,
       victimId: existingEmergency.victimId,
+      originDeviceId: existingEmergency.originDeviceId,
       type: existingEmergency.type,
       latitude: existingEmergency.latitude,
       longitude: existingEmergency.longitude,
@@ -553,6 +724,7 @@ class OfflineNearbyService {
     EmergencyModel updatedEmergency = EmergencyModel(
       id: existingEmergency.id,
       victimId: existingEmergency.victimId,
+      originDeviceId: existingEmergency.originDeviceId,
       type: existingEmergency.type,
       latitude: existingEmergency.latitude,
       longitude: existingEmergency.longitude,
@@ -654,6 +826,7 @@ class OfflineNearbyService {
     EmergencyModel updatedEmergency = EmergencyModel(
       id: existingEmergency.id,
       victimId: existingEmergency.victimId,
+      originDeviceId: existingEmergency.originDeviceId,
       type: existingEmergency.type,
       latitude: updatedLat,
       longitude: updatedLon,
@@ -674,10 +847,20 @@ class OfflineNearbyService {
 
   /// Stop all offline advertising & discovery
   Future<void> stopAll() async {
-    await Nearby().stopAdvertising();
-    await Nearby().stopDiscovery();
-    await Nearby().stopAllEndpoints();
+    try {
+      await Nearby().stopAdvertising();
+    } catch (_) {}
+    try {
+      await Nearby().stopDiscovery();
+    } catch (_) {}
+    try {
+      await Nearby().stopAllEndpoints();
+    } catch (_) {}
+    _isAdvertising = false;
+    _isDiscovering = false;
+    _discoverySubscribers = 0;
     _connectedPeers.clear();
     _connectedEndpoints.clear();
+    P2PDiagnostics.log('NONE', 'STOP_ALL', {'status': 'CLEARED'});
   }
 }

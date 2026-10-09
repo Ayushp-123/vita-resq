@@ -89,7 +89,11 @@ class CommunicationManager {
     required double userLon,
     required String currentUserId,
   }) {
-    return _activeService!.listenForAlerts(
+    if (_activeService == null) {
+      _activeMode = _connectivityService.currentMode;
+      _updateActiveService(_activeMode);
+    }
+    return (_activeService ?? _onlineService).listenForAlerts(
         userLat: userLat, userLon: userLon, currentUserId: currentUserId);
   }
 

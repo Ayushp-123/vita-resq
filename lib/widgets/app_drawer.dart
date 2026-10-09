@@ -321,7 +321,7 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Vita ResQ v2.0 • Community Emergency Response Layer',
+            'Vita ResQ is a community emergency-response platform and does not replace official emergency services.',
             style: AppTypography.metadata,
             textAlign: TextAlign.center,
           ),

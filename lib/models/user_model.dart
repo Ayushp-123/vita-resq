@@ -8,7 +8,7 @@ class UserModel {
   final String? phoneNumber;
   final String? bloodGroup;
   final String userRole; // 'CITIZEN', 'AMBULANCE_DRIVER', 'POLICE_PCR'
-  final String? vehicleNumber; // e.g. 'DL-04-108' or 'PCR-12'
+  final String? vehicleNumber; // e.g. 'DL-04-AMB' or 'PCR-12'
   final double? latitude;
   final double? longitude;
   final double? locationAccuracy;

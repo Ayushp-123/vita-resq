@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
@@ -176,11 +175,36 @@ class EmergencyService {
         );
 
         await localDb.saveEmergencyLocally(updated);
-        await OfflineNearbyService().sendStatusUpdatePayload(
-          emergencyId: emergencyId,
-          status: status.name,
-          responderId: responderId,
-        );
+        try {
+          await OfflineNearbyService().sendStatusUpdatePayload(
+            emergencyId: emergencyId,
+            status: status.name,
+            responderId: responderId,
+          );
+        } catch (_) {}
+      }
+
+      // If connectivity exists and emergency was synced to Firestore, ensure terminal state propagates to Firestore
+      try {
+        Map<String, dynamic> updates = {
+          'status': status.name,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        if (responderId != null) {
+          updates['responders.$responderId.status'] = (status == EmergencyStatus.ARRIVED)
+              ? ResponderStatus.ARRIVED.name
+              : (status == EmergencyStatus.COMPLETED)
+                  ? ResponderStatus.COMPLETED.name
+                  : ResponderStatus.RESPONDING.name;
+          updates['responders.$responderId.lastLocationUpdate'] = FieldValue.serverTimestamp();
+        }
+        await _firestore
+            .collection(AppConstants.emergenciesCollection)
+            .doc(emergencyId)
+            .update(updates);
+        await localDb.markAsSynced(emergencyId);
+      } catch (_) {
+        // Document may not yet exist in Firestore or offline; CommunicationManager will sync on connectivity
       }
       return;
     }
@@ -204,6 +228,55 @@ class EmergencyService {
         .collection(AppConstants.emergenciesCollection)
         .doc(emergencyId)
         .update(updates);
+
+    // Keep LocalDatabaseService synchronized so local fallback data does not retain SEARCHING
+    try {
+      LocalDatabaseService localDb = LocalDatabaseService();
+      EmergencyModel? localExisting = await localDb.getEmergencyById(emergencyId);
+      if (localExisting != null) {
+        Map<String, ResponderModel> updatedResponders = Map<String, ResponderModel>.from(localExisting.responders);
+        if (responderId != null && updatedResponders.containsKey(responderId)) {
+          ResponderModel r = updatedResponders[responderId]!;
+          updatedResponders[responderId] = ResponderModel(
+            userId: r.userId,
+            userName: r.userName,
+            phoneNumber: r.phoneNumber,
+            bloodGroup: r.bloodGroup,
+            role: r.role,
+            status: ResponderStatus.values.firstWhere(
+              (e) => e.name == status.name,
+              orElse: () => r.status,
+            ),
+            latitude: r.latitude,
+            longitude: r.longitude,
+            acceptedAt: r.acceptedAt,
+            lastLocationUpdate: DateTime.now(),
+            assignedAt: r.assignedAt,
+            distanceToVictim: r.distanceToVictim,
+            etaText: r.etaText,
+            etaMinutes: r.etaMinutes,
+            problemReason: r.problemReason,
+          );
+        }
+        EmergencyModel updatedLocal = EmergencyModel(
+          id: localExisting.id,
+          victimId: localExisting.victimId,
+          type: localExisting.type,
+          latitude: localExisting.latitude,
+          longitude: localExisting.longitude,
+          status: status,
+          helperId: localExisting.helperId,
+          currentRadiusMeters: localExisting.currentRadiusMeters,
+          notifiedUserIds: localExisting.notifiedUserIds,
+          responders: updatedResponders,
+          createdAt: localExisting.createdAt,
+          updatedAt: DateTime.now(),
+          lastVictimLocation: localExisting.lastVictimLocation,
+          lastHelperLocation: localExisting.lastHelperLocation,
+        );
+        await localDb.saveEmergencyLocally(updatedLocal);
+      }
+    } catch (_) {}
   }
 
   static final Set<String> _declinedEmergencyIds = {};
@@ -636,14 +709,18 @@ class EmergencyService {
 
   /// Pure read/state-sync stream of an active emergency
   Stream<EmergencyModel> streamEmergency(String emergencyId) {
-    return _firestore
-        .collection(AppConstants.emergenciesCollection)
-        .doc(emergencyId)
-        .snapshots()
-        .map((doc) {
-      if (!doc.exists) throw Exception("Emergency document not found");
-      return EmergencyModel.fromMap(doc.data()!, doc.id);
-    });
+    try {
+      return _firestore
+          .collection(AppConstants.emergenciesCollection)
+          .doc(emergencyId)
+          .snapshots()
+          .map((doc) {
+        if (!doc.exists) throw Exception("Emergency document not found");
+        return EmergencyModel.fromMap(doc.data()!, doc.id);
+      });
+    } catch (e) {
+      return Stream.error(e);
+    }
   }
 
   /// Stream searching emergencies for active nearby users
@@ -660,6 +737,9 @@ class EmergencyService {
 
       for (var doc in snapshot.docs) {
         var emergency = EmergencyModel.fromMap(doc.data(), doc.id);
+        if (emergency.isTerminal) {
+          continue; // Terminal emergencies must never appear as active nearby opportunities
+        }
         if (emergency.victimId == currentUserId && currentUserId != null) {
           continue; // skip own emergency if logged in as victim
         }
@@ -790,23 +870,26 @@ class EmergencyContactsService {
     }
   }
 
-  static const MethodChannel _smsChannel = MethodChannel('com.example.jan_sarthi/sms');
+  static const String _smsFallbackPrefix = 'has_dispatched_sms_fallback_';
+  static final Set<String> _inFlightOrDispatched = {};
 
-  /// Send direct background SMS (Zero clicks required, silent background transmission for unconscious victims)
-  Future<bool> sendDirectBackgroundSMS({
-    required List<String> phoneNumbers,
-    required String message,
-  }) async {
-    try {
-      final bool? success = await _smsChannel.invokeMethod<bool>('sendDirectSms', {
-        'phoneNumbers': phoneNumbers,
-        'message': message,
-      });
-      return success ?? false;
-    } catch (e) {
-      if (kDebugMode) print('[DIRECT SMS] MethodChannel fallback: $e');
-      return false;
-    }
+  /// Check if automated or manual emergency SMS has already been dispatched for this emergency ID
+  static Future<bool> hasDispatchedSmsFallback(String emergencyId) async {
+    if (_inFlightOrDispatched.contains(emergencyId)) return true;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('$_smsFallbackPrefix$emergencyId') ?? false;
+  }
+
+  /// Mark automated or manual emergency SMS as dispatched for this emergency ID
+  static Future<void> markSmsFallbackDispatched(String emergencyId) async {
+    _inFlightOrDispatched.add(emergencyId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('$_smsFallbackPrefix$emergencyId', true);
+  }
+
+  @visibleForTesting
+  static void resetFallbackStateForTesting() {
+    _inFlightOrDispatched.clear();
   }
 
   /// Format emergency message payload with victim details and Google Maps location
@@ -874,15 +957,17 @@ class EmergencyContactsService {
 
     // Try to load cached user profile if not provided
     if (victimName == null || bloodGroup == null) {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        UserModel? profile = await AuthService().getUserProfile(user.uid);
-        if (profile != null) {
-          victimName ??= profile.name;
-          victimPhone ??= profile.phoneNumber;
-          bloodGroup ??= profile.bloodGroup;
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          UserModel? profile = await AuthService().getUserProfile(user.uid);
+          if (profile != null) {
+            victimName ??= profile.name;
+            victimPhone ??= profile.phoneNumber;
+            bloodGroup ??= profile.bloodGroup;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     String message = formatEmergencyMessage(
@@ -937,15 +1022,17 @@ class EmergencyContactsService {
     String? victimName;
     String? victimPhone;
     String? bloodGroup;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      UserModel? profile = await AuthService().getUserProfile(user.uid);
-      if (profile != null) {
-        victimName = profile.name;
-        victimPhone = profile.phoneNumber;
-        bloodGroup = profile.bloodGroup;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        UserModel? profile = await AuthService().getUserProfile(user.uid);
+        if (profile != null) {
+          victimName = profile.name;
+          victimPhone = profile.phoneNumber;
+          bloodGroup = profile.bloodGroup;
+        }
       }
-    }
+    } catch (_) {}
 
     String mapsUrl = 'https://maps.google.com/?q=${latitude.toStringAsFixed(5)},${longitude.toStringAsFixed(5)}';
 
@@ -969,18 +1056,26 @@ class EmergencyContactsService {
 
     // Auto-normalize phone number with International Country Code (default: +91 India)
     String targetPhone = specificPhoneNumber ?? contacts.first.phoneNumber;
-    String formattedPhone = normalizePhoneNumber(targetPhone);
+    String formattedPhone = formatWhatsAppNumber(targetPhone);
 
-    final Uri waUri = Uri.parse('whatsapp://send?phone=$formattedPhone&text=${Uri.encodeComponent(message)}');
+    if (formattedPhone.isEmpty) {
+      if (kDebugMode) print('[WHATSAPP] Target phone number is missing or invalid.');
+      return false;
+    }
+
+    // Primary: WhatsApp universal link (wa.me) recommended by WhatsApp
     final Uri waMeUri = Uri.parse('https://wa.me/$formattedPhone?text=${Uri.encodeComponent(message)}');
+    // Secondary fallback: WhatsApp application custom scheme
+    final Uri waUri = Uri.parse('whatsapp://send?phone=$formattedPhone&text=${Uri.encodeComponent(message)}');
+    // Tertiary fallback: WhatsApp Web API link
     final Uri webWaUri = Uri.parse('https://api.whatsapp.com/send?phone=$formattedPhone&text=${Uri.encodeComponent(message)}');
 
     try {
-      if (await canLaunchUrl(waUri)) {
-        await launchUrl(waUri, mode: LaunchMode.externalApplication);
-        return true;
-      } else if (await canLaunchUrl(waMeUri)) {
+      if (await canLaunchUrl(waMeUri)) {
         await launchUrl(waMeUri, mode: LaunchMode.externalApplication);
+        return true;
+      } else if (await canLaunchUrl(waUri)) {
+        await launchUrl(waUri, mode: LaunchMode.externalApplication);
         return true;
       } else if (await canLaunchUrl(webWaUri)) {
         await launchUrl(webWaUri, mode: LaunchMode.externalApplication);
@@ -992,15 +1087,96 @@ class EmergencyContactsService {
     return false;
   }
 
+  /// Normalize phone number for WhatsApp's international format:
+  /// Output is digits-only: <country_code><subscriber_number> without '+', '00', or trunk '0'.
+  static String formatWhatsAppNumber(String phone, {String defaultCountryCode = '91'}) {
+    String trimmed = phone.trim();
+    if (trimmed.isEmpty) return '';
+
+    // Check if explicitly provided with '+'
+    bool hasPlus = trimmed.startsWith('+');
+
+    // Strip non-digits
+    String digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return '';
+
+    // Strip leading international prefix '00' if no plus was used
+    if (!hasPlus && digits.startsWith('00') && digits.length > 4) {
+      digits = digits.substring(2);
+      hasPlus = true; // treated as explicit international
+    }
+
+    if (hasPlus) {
+      // If user provided +91 followed by trunk 0 (e.g. +91 09876543210 -> 13 digits)
+      if (digits.startsWith('910') && digits.length == 13) {
+        digits = '91${digits.substring(3)}';
+      }
+      // If user provided +44 followed by trunk 0 (e.g. +44 07... -> 13 digits)
+      else if (digits.startsWith('440') && digits.length == 13) {
+        digits = '44${digits.substring(3)}';
+      }
+      return (digits.length >= 7 && digits.length <= 15) ? digits : '';
+    }
+
+    // No explicit '+' or '00':
+    // If starts with single trunk '0'
+    if (digits.startsWith('0')) {
+      digits = digits.replaceFirst(RegExp(r'^0+'), '');
+    }
+
+    // If 10 digits remaining, apply defaultCountryCode
+    if (digits.length == 10) {
+      digits = '$defaultCountryCode$digits';
+    }
+
+    // Validate E.164 length (7 to 15 digits)
+    if (digits.length >= 7 && digits.length <= 15) {
+      return digits;
+    }
+
+    return '';
+  }
+
   /// Normalize any phone number with country code (+91 by default)
   static String normalizePhoneNumber(String phone, {String defaultCountryCode = '91'}) {
-    String clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (clean.startsWith('0') && clean.length == 11) {
-      clean = clean.substring(1);
+    return formatWhatsAppNumber(phone, defaultCountryCode: defaultCountryCode);
+  }
+
+  /// Normalize any phone number for the system dialer (preserves leading '+', strips formatting).
+  /// Rejects numbers shorter than 7 or longer than 15 digits, and rejects emergency numbers like 112.
+  static String normalizeDialerNumber(String phone) {
+    final trimmed = phone.trim();
+    if (trimmed.isEmpty) return '';
+    final hasPlus = trimmed.startsWith('+');
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 7 || digits.length > 15) return '';
+
+    // Guard: never dial official helpline numbers through counterpart routing
+    if (digits == '112' || digits == '911' || digits == '108' || digits == '100' || digits == '101') {
+      return '';
     }
-    if (clean.length == 10) {
-      clean = '$defaultCountryCode$clean';
+
+    return hasPlus ? '+$digits' : digits;
+  }
+
+  /// Launch native phone dialer with pre-populated phone number.
+  /// Uses system dialer (ACTION_DIAL) requiring explicit user confirmation to place call;
+  /// does NOT request or require direct-call permission (CALL_PHONE).
+  static Future<bool> launchDialer(String phoneNumber) async {
+    final clean = normalizeDialerNumber(phoneNumber);
+    if (clean.isEmpty) return false;
+
+    final Uri dialerUri = Uri.parse('tel:$clean');
+    try {
+      if (await canLaunchUrl(dialerUri)) {
+        return await launchUrl(dialerUri, mode: LaunchMode.externalApplication);
+      } else {
+        // Fallback attempt in case canLaunchUrl was limited by package visibility
+        return await launchUrl(dialerUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (kDebugMode) print('[DIALER] Launch error: $e');
     }
-    return clean;
+    return false;
   }
 }
